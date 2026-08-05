@@ -2,7 +2,7 @@ extends Node
 ## Точка входа. Автозагрузка "Boot".
 ## Отвечает за: ввод, меню, сеть, спавн игроков, HUD.
 
-const VERSION := "v0.4"
+const VERSION := "v0.4.1"
 const PORT := 7777
 const MAX_PLAYERS := 4
 
@@ -425,7 +425,7 @@ func update_contract_hud() -> void:
 		_contract_label.text = ""
 		return
 	var lines: PackedStringArray = []
-	lines.append(String(Game.contract["title"]))
+	lines.append("Контракт №%d  ·  %s" % [int(Game.contract.get("index", 1)), String(Game.contract["title"])])
 	if Game.contract_running:
 		var left := maxf(Game.deadline_seconds() - Game.contract_time, 0.0)
 		lines.append("Неделя %d из %d   ·   осталось %d:%02d" % [

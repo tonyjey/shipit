@@ -49,9 +49,9 @@ func tray_slot(i: int) -> Vector3:
 func _build_board() -> void:
 	board = Label3D.new()
 	board.text = "ждём контракт..."
-	board.position = tray_position() + Vector3(0, 2.7, 0)
+	board.position = Vector3(0, 3.0, ROOM * 0.5 - 0.45)
 	board.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	board.pixel_size = 0.008
+	board.pixel_size = 0.0052
 	board.outline_size = 10
 	board.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	add_child(board)
@@ -62,8 +62,8 @@ func set_board(c: Dictionary) -> void:
 	if board == null or c.is_empty():
 		return
 	var need: Dictionary = c["need"]
-	board.text = "%s\nнужно:  Код %d   ·   Графика %d   ·   Музыка %d\nсрок: %d недель   ·   гонорар %d ₽" % [
-		String(c["title"]),
+	board.text = "КОНТРАКТ №%d   ·   %s\nнужно:  Код %d   ·   Графика %d   ·   Музыка %d\nсрок: %d недель   ·   гонорар %d ₽" % [
+		int(c.get("index", 1)), String(c["title"]),
 		int(need.get("code", 0)), int(need.get("art", 0)), int(need.get("music", 0)),
 		int(c["weeks"]), int(c["pay"])]
 
@@ -153,9 +153,18 @@ func _build_assembler() -> void:
 
 
 func _build_tray() -> void:
-	tray = Node3D.new()
-	tray.position = tray_position()
-	add_child(tray)
+	# StaticBody3D, а не Node3D — иначе сквозь лоток можно пройти насквозь
+	var body := StaticBody3D.new()
+	body.position = tray_position()
+	add_child(body)
+	tray = body
+
+	var cs := CollisionShape3D.new()
+	var bs := BoxShape3D.new()
+	bs.size = Vector3(1.9, 0.96, 1.0)
+	cs.shape = bs
+	cs.position = Vector3(0, 0.48, 0)
+	body.add_child(cs)
 
 	var mat := StandardMaterial3D.new()
 	mat.albedo_color = Color(0.55, 0.45, 0.32)
@@ -180,8 +189,8 @@ func _build_tray() -> void:
 
 	var label := Label3D.new()
 	label.text = "ЛОТОК ЗАДАЧ"
-	label.position = Vector3(0, 1.6, 0)
+	label.position = Vector3(0, 1.75, 0)
 	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	label.pixel_size = 0.007
+	label.pixel_size = 0.0045
 	label.outline_size = 8
 	tray.add_child(label)

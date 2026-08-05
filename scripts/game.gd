@@ -31,6 +31,7 @@ var contract_time := 0.0
 var contract_running := false
 var delivered_by: Dictionary = {"code": 0, "art": 0, "music": 0}
 var money := 0
+var difficulty := 0
 
 var items: Dictionary = {}
 var work: Dictionary = {}      # idx -> {disc, tokens, done, mistakes, occupant}
@@ -60,6 +61,8 @@ func reset() -> void:
 	contract_time = 0.0
 	contract_running = false
 	delivered_by = {"code": 0, "art": 0, "music": 0}
+	difficulty = 0
+	money = 0
 	if Boot.terminal:
 		Boot.terminal.close()
 	if Boot.results:
@@ -175,7 +178,9 @@ func server_release_items(peer_id: int) -> void:
 		return
 	for it in items.values():
 		if it.holder == peer_id:
-			_bcast("rpc_item_state", [it.item_id, 0, it.global_position])
+			var pos: Vector3 = it.global_position
+			pos.y = 0.35
+			_bcast("rpc_item_state", [it.item_id, 0, pos])
 	for idx in work.keys():
 		if int(work[idx]["occupant"]) == peer_id:
 			_bcast("rpc_work_occupant", [int(idx), 0])
@@ -305,9 +310,26 @@ func _server_drop(pid: int) -> void:
 		return
 	var p := Boot.players[pid] as Node3D
 	var fwd := -p.global_transform.basis.z
-	var pos := p.global_position + fwd * 1.0
+	_bcast("rpc_item_state", [held.item_id, 0, safe_drop_point(p, fwd)])
+
+
+## Куда реально положить предмет: если впереди стол или машина,
+## кладём перед препятствием, а не внутрь него.
+func safe_drop_point(p: Node3D, fwd: Vector3) -> Vector3:
+	var from := p.global_position + Vector3(0, 0.9, 0)
+	var to := from + fwd * 1.15
+	var pos := to
+	var space := p.get_world_3d().direct_space_state
+	var q := PhysicsRayQueryParameters3D.create(from, to)
+	q.exclude = [p.get_rid()]
+	var hit := space.intersect_ray(q)
+	if not hit.is_empty():
+		pos = (hit["position"] as Vector3) - fwd * 0.45
 	pos.y = 0.35
-	_bcast("rpc_item_state", [held.item_id, 0, pos])
+	var lim := 8.6
+	pos.x = clampf(pos.x, -lim, lim)
+	pos.z = clampf(pos.z, -lim, lim)
+	return pos
 
 
 func _server_token(pid: int, idx: int, mistakes: int) -> void:
@@ -455,10 +477,27 @@ func server_start_contract() -> void:
 	if not _is_server():
 		return
 	var c: Dictionary = CONTRACTS[randi() % CONTRACTS.size()].duplicate(true)
-	var mult := maxi(Boot.players.size(), 1)
 	var need: Dictionary = c["need"]
+	var order := ["code", "art", "music"]
+
+	var base_total := 0
+	for k in need.keys():
+		base_total += int(need[k])
+
+	# каждый закрытый контракт добавляет одну задачу, но не больше шести
+	for i in mini(difficulty, 6):
+		var k: String = order[i % order.size()]
+		need[k] = int(need[k]) + 1
+
+	# нагрузка растёт от числа игроков, срок — нет
+	var mult := maxi(Boot.players.size(), 1)
+	var total := 0
 	for k in need.keys():
 		need[k] = int(need[k]) * mult
+		total += int(need[k])
+
+	c["pay"] = int(round(float(c["pay"]) * float(total) / float(maxi(base_total * mult, 1))))
+	c["index"] = difficulty + 1
 	_bcast("rpc_contract_start", [c])
 
 
@@ -530,6 +569,7 @@ func rpc_contract_time(t: float) -> void:
 func rpc_contract_end(score: int, pay: int, completeness: float, quality: float, early: bool) -> void:
 	contract_running = false
 	money += pay
+	difficulty += 1
 	if Boot.terminal:
 		Boot.terminal.close()
 	if Boot.results:
