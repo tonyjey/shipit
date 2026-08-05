@@ -1,28 +1,47 @@
 extends Node3D
-## Офис. Пока целиком из примитивов — плейсхолдер под будущие ассеты.
+## Офис. Всё из примитивов — плейсхолдер под будущие ассеты.
 
 const StationScript := preload("res://scripts/workstation.gd")
+const AssemblerScript := preload("res://scripts/assembler.gd")
 
-const ROOM := 18.0
+const ROOM := 20.0
 
 const STATIONS := [
-	{"id": "code",  "title": "Код",      "color": Color(0.40, 0.70, 1.00)},
-	{"id": "art",   "title": "Графика",  "color": Color(1.00, 0.52, 0.62)},
-	{"id": "music", "title": "Музыка",   "color": Color(0.70, 0.52, 1.00)},
-	{"id": "text",  "title": "Сценарий", "color": Color(1.00, 0.82, 0.42)},
+	{"disc": "code",  "title": "Код",     "color": Color(0.40, 0.70, 1.00)},
+	{"disc": "art",   "title": "Графика", "color": Color(1.00, 0.52, 0.62)},
+	{"disc": "music", "title": "Музыка",  "color": Color(0.70, 0.52, 1.00)},
 ]
+
+var stations: Array = []
+var assembler: Node3D = null
+var items_root: Node3D = null
+var tray: Node3D = null
 
 
 func _ready() -> void:
+	items_root = Node3D.new()
+	items_root.name = "Items"
+	add_child(items_root)
+
 	_build_env()
 	_build_light()
 	_build_floor()
 	_build_walls()
 	_build_stations()
+	_build_assembler()
+	_build_tray()
 
 
 func get_spawn_point(index: int) -> Vector3:
-	return Vector3(-2.4 + index * 1.6, 1.2, 5.0)
+	return Vector3(-2.4 + index * 1.6, 1.2, 7.4)
+
+
+func tray_position() -> Vector3:
+	return Vector3(0, 0, 5.4)
+
+
+func tray_slot(i: int) -> Vector3:
+	return tray_position() + Vector3(-0.65 + float(i) * 0.26, 1.05, 0)
 
 
 func _build_env() -> void:
@@ -51,7 +70,7 @@ func _build_light() -> void:
 	add_child(sun)
 
 
-func _box(size: Vector3, pos: Vector3, col: Color, solid := true) -> StaticBody3D:
+func _box(size: Vector3, pos: Vector3, col: Color) -> StaticBody3D:
 	var body := StaticBody3D.new()
 	body.position = pos
 
@@ -64,12 +83,11 @@ func _box(size: Vector3, pos: Vector3, col: Color, solid := true) -> StaticBody3
 	mesh.material_override = mat
 	body.add_child(mesh)
 
-	if solid:
-		var cs := CollisionShape3D.new()
-		var bs := BoxShape3D.new()
-		bs.size = size
-		cs.shape = bs
-		body.add_child(cs)
+	var cs := CollisionShape3D.new()
+	var bs := BoxShape3D.new()
+	bs.size = size
+	cs.shape = bs
+	body.add_child(cs)
 
 	add_child(body)
 	return body
@@ -91,12 +109,55 @@ func _build_walls() -> void:
 
 
 func _build_stations() -> void:
-	var xs := [-5.0, -1.8, 1.8, 5.0]
+	var xs := [-5.0, 0.0, 5.0]
 	for i in STATIONS.size():
 		var data: Dictionary = STATIONS[i]
 		var st := StationScript.new()
-		st.station_id = String(data["id"])
+		st.index = i
+		st.discipline = String(data["disc"])
 		st.title = String(data["title"])
 		st.color = data["color"]
-		st.position = Vector3(float(xs[i]), 0.0, -4.5)
+		st.position = Vector3(float(xs[i]), 0.0, -6.0)
 		add_child(st)
+		stations.append(st)
+
+
+func _build_assembler() -> void:
+	assembler = AssemblerScript.new()
+	assembler.position = Vector3(0, 0, -0.5)
+	add_child(assembler)
+
+
+func _build_tray() -> void:
+	tray = Node3D.new()
+	tray.position = tray_position()
+	add_child(tray)
+
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = Color(0.55, 0.45, 0.32)
+
+	var top := MeshInstance3D.new()
+	var tm := BoxMesh.new()
+	tm.size = Vector3(1.9, 0.12, 1.0)
+	top.mesh = tm
+	top.material_override = mat
+	top.position = Vector3(0, 0.9, 0)
+	tray.add_child(top)
+
+	for sx in [-0.8, 0.8]:
+		for sz in [-0.4, 0.4]:
+			var leg := MeshInstance3D.new()
+			var lm := BoxMesh.new()
+			lm.size = Vector3(0.1, 0.84, 0.1)
+			leg.mesh = lm
+			leg.material_override = mat
+			leg.position = Vector3(sx, 0.42, sz)
+			tray.add_child(leg)
+
+	var label := Label3D.new()
+	label.text = "ЛОТОК ЗАДАЧ"
+	label.position = Vector3(0, 1.6, 0)
+	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	label.pixel_size = 0.007
+	label.outline_size = 8
+	tray.add_child(label)

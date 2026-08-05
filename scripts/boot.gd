@@ -1,6 +1,6 @@
 extends Node
-## Точка входа. Автозагрузка (singleton "Boot").
-## Отвечает за: настройку ввода, меню, сеть, спавн игроков, HUD.
+## Точка входа. Автозагрузка "Boot".
+## Отвечает за: ввод, меню, сеть, спавн игроков, HUD.
 
 const PORT := 7777
 const MAX_PLAYERS := 4
@@ -15,9 +15,10 @@ const COLORS := [
 	Color(0.97, 0.80, 0.35),
 ]
 
-var world: Node3D = null
-var players: Dictionary = {}          # peer_id -> Player
-var solo_mode := false
+var world = null
+var players: Dictionary = {}     # peer_id -> Player
+var slots: Dictionary = {}       # peer_id -> 1..4
+var ready_peers: Array = []      # кому уже можно слать состояние
 var in_game := false
 
 var _hud: CanvasLayer = null
@@ -26,6 +27,7 @@ var _ip_edit: LineEdit = null
 var _status: Label = null
 var _prompt: Label = null
 var _toast: Label = null
+var _hint: Label = null
 var _toast_time := 0.0
 
 
@@ -55,6 +57,7 @@ func _setup_input() -> void:
 	_bind("move_right", KEY_D)
 	_bind("jump", KEY_SPACE)
 	_bind("interact", KEY_E)
+	_bind("drop", KEY_Q)
 	_bind("free_mouse", KEY_ESCAPE)
 
 
@@ -68,30 +71,41 @@ func _bind(action: String, key: Key) -> void:
 
 # ---------------------------------------------------------------- UI
 
+func _mk_label(size: int) -> Label:
+	var l := Label.new()
+	l.set_anchors_preset(Control.PRESET_FULL_RECT)
+	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	l.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	l.add_theme_font_size_override("font_size", size)
+	l.add_theme_constant_override("outline_size", 8)
+	l.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.85))
+	return l
+
+
 func _build_ui() -> void:
 	_hud = CanvasLayer.new()
 	_hud.name = "HUD"
 	get_tree().root.add_child(_hud)
 
-	# --- подсказка взаимодействия (центр экрана)
-	_prompt = Label.new()
-	_prompt.set_anchors_preset(Control.PRESET_CENTER)
-	_prompt.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_prompt.position = Vector2(-200, 60)
-	_prompt.size = Vector2(400, 30)
-	_prompt.add_theme_font_size_override("font_size", 20)
+	# подсказка взаимодействия — чуть ниже центра
+	_prompt = _mk_label(22)
+	_prompt.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	_prompt.offset_top = 110
 	_hud.add_child(_prompt)
 
-	# --- тост (сообщения)
-	_toast = Label.new()
-	_toast.set_anchors_preset(Control.PRESET_CENTER_TOP)
-	_toast.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_toast.position = Vector2(-300, 40)
-	_toast.size = Vector2(600, 30)
-	_toast.add_theme_font_size_override("font_size", 22)
+	# что в руках — внизу
+	_hint = _mk_label(20)
+	_hint.vertical_alignment = VERTICAL_ALIGNMENT_BOTTOM
+	_hint.offset_bottom = -30
+	_hud.add_child(_hint)
+
+	# всплывающие сообщения — сверху
+	_toast = _mk_label(24)
+	_toast.vertical_alignment = VERTICAL_ALIGNMENT_TOP
+	_toast.offset_top = 50
 	_hud.add_child(_toast)
 
-	# --- меню
+	# меню
 	_menu = Control.new()
 	_menu.set_anchors_preset(Control.PRESET_FULL_RECT)
 	_hud.add_child(_menu)
@@ -106,7 +120,7 @@ func _build_ui() -> void:
 	_menu.add_child(center)
 
 	var box := VBoxContainer.new()
-	box.custom_minimum_size = Vector2(360, 0)
+	box.custom_minimum_size = Vector2(380, 0)
 	box.add_theme_constant_override("separation", 10)
 	center.add_child(box)
 
@@ -117,7 +131,7 @@ func _build_ui() -> void:
 	box.add_child(title)
 
 	var sub := Label.new()
-	sub.text = "прототип v0.1 — каркас"
+	sub.text = "прототип v0.2 — конвейер"
 	sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	box.add_child(sub)
 
@@ -154,6 +168,11 @@ func set_prompt(text: String) -> void:
 		_prompt.text = text
 
 
+func set_hint(text: String) -> void:
+	if _hint:
+		_hint.text = text
+
+
 func toast(text: String, seconds := 2.5) -> void:
 	if _toast:
 		_toast.text = text
@@ -174,9 +193,9 @@ func _host() -> void:
 		_set_status("Не удалось поднять сервер (код %d)" % err)
 		return
 	multiplayer.multiplayer_peer = peer
-	solo_mode = false
 	_enter_game()
-	_spawn_player(1)
+	ready_peers = [1]
+	_spawn_player(1, 1)
 	toast("Комната создана. Порт %d" % PORT)
 
 
@@ -191,15 +210,14 @@ func _join() -> void:
 		_set_status("Не удалось подключиться (код %d)" % err)
 		return
 	multiplayer.multiplayer_peer = peer
-	solo_mode = false
 	_set_status("Подключаюсь к %s..." % ip)
 
 
 func _solo() -> void:
-	solo_mode = true
 	multiplayer.multiplayer_peer = null
 	_enter_game()
-	_spawn_player(1)
+	ready_peers = [1]
+	_spawn_player(1, 1)
 
 
 func _on_connected_ok() -> void:
@@ -218,28 +236,47 @@ func _on_server_disconnected() -> void:
 
 
 func _on_peer_connected(_id: int) -> void:
-	pass  # ждём _request_join от клиента
+	pass  # ждём _request_join — клиент сам скажет, когда построит мир
 
 
 func _on_peer_disconnected(id: int) -> void:
-	if multiplayer.is_server():
-		rpc("_remote_despawn", id)
+	if not multiplayer.is_server():
+		return
+	Game.server_release_items(id)
+	ready_peers.erase(id)
+	rpc("_sync_ready", ready_peers)
+	rpc("_remote_despawn", id)
 
 
-## Клиент сообщает серверу, что мир построен и он готов принять игроков.
+func _free_slot() -> int:
+	for s in range(1, MAX_PLAYERS + 1):
+		if not slots.values().has(s):
+			return s
+	return 1
+
+
+## Клиент сообщает: мир построен, можно присылать игроков и предметы.
 @rpc("any_peer", "reliable")
 func _request_join() -> void:
 	if not multiplayer.is_server():
 		return
 	var new_id := multiplayer.get_remote_sender_id()
 	for existing_id in players.keys():
-		rpc_id(new_id, "_remote_spawn", existing_id)
-	rpc("_remote_spawn", new_id)
+		rpc_id(new_id, "_remote_spawn", existing_id, int(slots[existing_id]))
+	rpc("_remote_spawn", new_id, _free_slot())
+	ready_peers.append(new_id)
+	rpc("_sync_ready", ready_peers)
+	Game.server_send_snapshot(new_id)
 
 
 @rpc("authority", "call_local", "reliable")
-func _remote_spawn(id: int) -> void:
-	_spawn_player(id)
+func _sync_ready(list: Array) -> void:
+	ready_peers = list.duplicate()
+
+
+@rpc("authority", "call_local", "reliable")
+func _remote_spawn(id: int, slot: int) -> void:
+	_spawn_player(id, slot)
 
 
 @rpc("authority", "call_local", "reliable")
@@ -247,7 +284,8 @@ func _remote_despawn(id: int) -> void:
 	if players.has(id):
 		players[id].queue_free()
 		players.erase(id)
-		toast("Игрок %d вышел" % id)
+		slots.erase(id)
+		toast("Игрок вышел")
 
 
 # ---------------------------------------------------------------- МИР / ИГРОКИ
@@ -257,35 +295,42 @@ func _enter_game() -> void:
 		return
 	in_game = true
 	_menu.visible = false
+	Game.reset()
 	world = WorldScript.new()
 	world.name = "World"
 	get_tree().current_scene.add_child(world)
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+	toast("WASD — ходить, E — взаимодействие, Q — бросить", 6.0)
 
 
 func _leave_game() -> void:
 	in_game = false
 	multiplayer.multiplayer_peer = null
 	players.clear()
+	slots.clear()
+	ready_peers.clear()
+	Game.reset()
 	if world:
 		world.queue_free()
 		world = null
 	_menu.visible = true
 	set_prompt("")
+	set_hint("")
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 
 
-func _spawn_player(id: int) -> void:
+func _spawn_player(id: int, slot: int) -> void:
 	if world == null or players.has(id):
 		return
-	var index := players.size()
 	var p := PlayerScript.new()
 	p.name = str(id)
 	p.peer_id = id
-	p.color = COLORS[index % COLORS.size()]
-	p.spawn_pos = world.get_spawn_point(index)
+	p.slot = slot
+	p.color = COLORS[(slot - 1) % COLORS.size()]
+	p.spawn_pos = world.get_spawn_point(slot - 1)
 	p.set_multiplayer_authority(id)
 	players[id] = p
+	slots[id] = slot
 	world.add_child(p)
 
 
@@ -293,3 +338,10 @@ func local_id() -> int:
 	if multiplayer.has_multiplayer_peer():
 		return multiplayer.get_unique_id()
 	return 1
+
+
+func local_player() -> Node3D:
+	var id := local_id()
+	if players.has(id):
+		return players[id]
+	return null

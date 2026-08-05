@@ -5,10 +5,14 @@ const SPEED := 5.5
 const ACCEL := 14.0
 const JUMP_FORCE := 6.5
 const SENS := 0.0022
-const NET_RATE := 1.0 / 20.0   # 20 пакетов в секунду
+const NET_RATE := 1.0 / 20.0
+
+const REACH := 2.7        # радиус взаимодействия
+const MIN_DOT := 0.25     # насколько нужно смотреть на объект
 
 # задаётся из Boot ДО add_child
 var peer_id := 1
+var slot := 1
 var color := Color.WHITE
 var spawn_pos := Vector3.ZERO
 
@@ -19,8 +23,6 @@ var pitch := -0.25
 var _pivot: Node3D
 var _spring: SpringArm3D
 var _cam: Camera3D
-var _ray: RayCast3D
-var _label: Label3D
 var _gravity := 18.0
 var _net_pos := Vector3.ZERO
 var _net_yaw := 0.0
@@ -59,7 +61,6 @@ func _build_body() -> void:
 	mesh.material_override = mat
 	add_child(mesh)
 
-	# «нос», чтобы видеть направление взгляда
 	var nose := MeshInstance3D.new()
 	var bm := BoxMesh.new()
 	bm.size = Vector3(0.16, 0.16, 0.35)
@@ -68,13 +69,14 @@ func _build_body() -> void:
 	nose.position = Vector3(0, 0.45, -0.4)
 	add_child(nose)
 
-	_label = Label3D.new()
-	_label.text = "P%d" % peer_id
-	_label.position = Vector3(0, 1.35, 0)
-	_label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	_label.no_depth_test = true
-	_label.pixel_size = 0.006
-	add_child(_label)
+	var label := Label3D.new()
+	label.text = "P%d" % slot
+	label.position = Vector3(0, 1.35, 0)
+	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	label.no_depth_test = true
+	label.pixel_size = 0.006
+	label.outline_size = 10
+	add_child(label)
 
 
 func _build_camera() -> void:
@@ -92,12 +94,6 @@ func _build_camera() -> void:
 	_cam.current = true
 	_spring.add_child(_cam)
 
-	_ray = RayCast3D.new()
-	_ray.target_position = Vector3(0, -0.35, -2.4)
-	_ray.collide_with_areas = false
-	_pivot.add_child(_ray)
-	_ray.add_exception(self)
-
 
 # ---------------------------------------------------------------- ВВОД
 
@@ -110,7 +106,23 @@ func _unhandled_input(event: InputEvent) -> void:
 		if _spring:
 			_spring.rotation.x = pitch
 	if event.is_action_pressed("free_mouse"):
-		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE if Input.mouse_mode == Input.MOUSE_MODE_CAPTURED else Input.MOUSE_MODE_CAPTURED
+		if Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
+			Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+		else:
+			Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+	if Input.mouse_mode != Input.MOUSE_MODE_CAPTURED:
+		return
+	if event.is_action_pressed("interact"):
+		_do_interact()
+	if event.is_action_pressed("drop"):
+		Game.request_drop()
+
+
+func _do_interact() -> void:
+	if _focus == null or not _focus.has_method("get_target"):
+		return
+	var t: Array = _focus.get_target()
+	Game.request_interact(String(t[0]), int(t[1]))
 
 
 # ---------------------------------------------------------------- ЛОГИКА
@@ -121,10 +133,14 @@ func _physics_process(delta: float) -> void:
 		_net_timer -= delta
 		if _net_timer <= 0.0 and multiplayer.has_multiplayer_peer():
 			_net_timer = NET_RATE
-			rpc("_push_state", global_position, yaw)
+			var me := multiplayer.get_unique_id()
+			for pid in Boot.ready_peers:
+				if int(pid) != me:
+					rpc_id(int(pid), "_push_state", global_position, yaw)
 	else:
-		global_position = global_position.lerp(_net_pos, clampf(delta * 12.0, 0.0, 1.0))
-		rotation.y = lerp_angle(rotation.y, _net_yaw, clampf(delta * 12.0, 0.0, 1.0))
+		var t := clampf(delta * 12.0, 0.0, 1.0)
+		global_position = global_position.lerp(_net_pos, t)
+		rotation.y = lerp_angle(rotation.y, _net_yaw, t)
 
 
 func _local_step(delta: float) -> void:
@@ -144,25 +160,50 @@ func _local_step(delta: float) -> void:
 	velocity.z = move_toward(velocity.z, target.z, ACCEL * delta * 4.0)
 
 	move_and_slide()
-	_check_focus()
+	_update_focus()
 
 
-func _check_focus() -> void:
-	if _ray == null:
-		return
-	var hit: Node = null
-	if _ray.is_colliding():
-		var c: Node = _ray.get_collider() as Node
-		if c != null and c.is_in_group("interactable"):
-			hit = c
-	if hit != _focus:
-		_focus = hit
+## Выбор цели по близости и направлению взгляда — надёжнее луча
+## и привычнее для игр в духе Overcooked.
+func _update_focus() -> void:
+	var best: Node = null
+	var best_score := -1e9
+	var fwd := -global_transform.basis.z
+	fwd.y = 0.0
+	fwd = fwd.normalized()
+
+	for n in get_tree().get_nodes_in_group("interactable"):
+		if not (n is Node3D) or not is_instance_valid(n):
+			continue
+		var n3 = n
+		if n3.has_method("can_focus") and not n3.can_focus(self):
+			continue
+		var to: Vector3 = n3.global_position - global_position
+		to.y = 0.0
+		var d: float = to.length()
+		if d > REACH:
+			continue
+		var dot: float = 1.0
+		if d > 0.05:
+			dot = fwd.dot(to / d)
+		if dot < MIN_DOT:
+			continue
+		var score: float = dot * 2.0 - d * 0.5
+		if score > best_score:
+			best_score = score
+			best = n3
+
+	_focus = best
 	if _focus and _focus.has_method("get_prompt"):
-		Boot.set_prompt(_focus.get_prompt())
+		Boot.set_prompt(_focus.get_prompt(self))
 	else:
 		Boot.set_prompt("")
-	if _focus and Input.is_action_just_pressed("interact") and _focus.has_method("interact"):
-		_focus.interact(self)
+
+	var held = Game.held_item_of(peer_id)
+	if held != null:
+		Boot.set_hint("В руках: %s     [Q] бросить" % Game.title_of(held.kind))
+	else:
+		Boot.set_hint("")
 
 
 @rpc("any_peer", "unreliable_ordered")
