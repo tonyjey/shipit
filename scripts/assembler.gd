@@ -96,8 +96,10 @@ func can_focus(_p) -> bool:
 
 func get_prompt(p) -> String:
 	var h = Game.held_item_of(p.peer_id)
-	if h != null and h.kind.begins_with("asset_"):
+	if h != null and String(h.kind).begins_with("asset_"):
 		return "[E] Сдать в сборку — %s" % Game.title_of(h.kind)
+	if Game.contract_running and Game.requirements_met():
+		return "[E] СДАТЬ ИГРУ ИЗДАТЕЛЮ — всё готово досрочно"
 	return "Сборка — неси готовый ассет со стола"
 
 

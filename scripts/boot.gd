@@ -2,13 +2,14 @@ extends Node
 ## Точка входа. Автозагрузка "Boot".
 ## Отвечает за: ввод, меню, сеть, спавн игроков, HUD.
 
-const VERSION := "v0.3.1"
+const VERSION := "v0.4"
 const PORT := 7777
 const MAX_PLAYERS := 4
 
 const PlayerScript := preload("res://scripts/player.gd")
 const WorldScript := preload("res://scripts/world.gd")
 const TerminalScript := preload("res://scripts/terminal.gd")
+const ResultsScript := preload("res://scripts/results.gd")
 
 const COLORS := [
 	Color(0.95, 0.36, 0.36),
@@ -23,6 +24,8 @@ var slots: Dictionary = {}       # peer_id -> 1..4
 var ready_peers: Array = []      # кому уже можно слать состояние
 var in_game := false
 var terminal = null
+var results = null
+var _contract_label: Label = null
 
 var _hud: CanvasLayer = null
 var _menu: Control = null
@@ -123,9 +126,26 @@ func _build_ui() -> void:
 	badge.add_theme_color_override("font_color", Color(0.85, 0.88, 0.95, 0.85))
 	_hud.add_child(badge)
 
+	# сводка по контракту — правый верхний угол
+	_contract_label = Label.new()
+	_contract_label.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_contract_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	_contract_label.vertical_alignment = VERTICAL_ALIGNMENT_TOP
+	_contract_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_contract_label.offset_top = 36.0
+	_contract_label.offset_right = -18.0
+	_contract_label.add_theme_font_size_override("font_size", 19)
+	_contract_label.add_theme_constant_override("outline_size", 7)
+	_contract_label.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.85))
+	_hud.add_child(_contract_label)
+
 	# терминал мини-игры
 	terminal = TerminalScript.new()
 	_hud.add_child(terminal)
+
+	# экран сдачи игры
+	results = ResultsScript.new()
+	_hud.add_child(results)
 
 	# меню
 	_menu = Control.new()
@@ -153,7 +173,7 @@ func _build_ui() -> void:
 	box.add_child(title)
 
 	var sub := Label.new()
-	sub.text = "прототип %s — мини-игра" % VERSION
+	sub.text = "прототип %s — контракты" % VERSION
 	sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	box.add_child(sub)
 
@@ -219,6 +239,7 @@ func _host() -> void:
 	ready_peers = [1]
 	_spawn_player(1, 1)
 	toast("Комната создана. Порт %d" % PORT)
+	Game.server_start_contract()
 
 
 func _join() -> void:
@@ -240,6 +261,7 @@ func _solo() -> void:
 	_enter_game()
 	ready_peers = [1]
 	_spawn_player(1, 1)
+	Game.server_start_contract()
 
 
 func _on_connected_ok() -> void:
@@ -368,7 +390,10 @@ func _unhandled_input(event: InputEvent) -> void:
 func dump_state() -> void:
 	print("=========== SHIP IT ", VERSION, " ===========")
 	print("viewport      : ", get_tree().root.get_visible_rect().size)
-	print("HUD           : ", _hud, " visible=", _hud.visible if _hud else "нет", " layer=", _hud.layer if _hud else "-")
+	if _hud:
+		print("HUD           : ", _hud, " visible=", _hud.visible, " layer=", _hud.layer)
+	else:
+		print("HUD           : нет")
 	if _prompt:
 		print("prompt        : rect=", _prompt.get_global_rect(), " text='", _prompt.text, "'")
 	if _hint:
@@ -383,8 +408,36 @@ func dump_state() -> void:
 		print("player        : pos=", lp.global_position, " focus=", lp._focus)
 	print("held item     : ", Game.held_item_of(local_id()))
 	print("предметов     : ", Game.items.size(), "  работа на столах: ", Game.work)
+	print("контракт      : ", Game.contract, " идёт=", Game.contract_running, " время=", Game.contract_time)
+	print("сдано         : ", Game.delivered_by, "  деньги: ", Game.money)
 	print("=========================================")
 	toast("Диагностика напечатана в панель Output", 3.0)
+
+
+func is_host() -> bool:
+	return (not multiplayer.has_multiplayer_peer()) or multiplayer.is_server()
+
+
+func update_contract_hud() -> void:
+	if _contract_label == null:
+		return
+	if Game.contract.is_empty():
+		_contract_label.text = ""
+		return
+	var lines: PackedStringArray = []
+	lines.append(String(Game.contract["title"]))
+	if Game.contract_running:
+		var left := maxf(Game.deadline_seconds() - Game.contract_time, 0.0)
+		lines.append("Неделя %d из %d   ·   осталось %d:%02d" % [
+			Game.current_week(), int(Game.contract["weeks"]), int(left) / 60, int(left) % 60])
+	else:
+		lines.append("контракт закрыт")
+	lines.append("Код %d/%d   Графика %d/%d   Музыка %d/%d" % [
+		int(Game.delivered_by["code"]), Game.need_of("code"),
+		int(Game.delivered_by["art"]), Game.need_of("art"),
+		int(Game.delivered_by["music"]), Game.need_of("music")])
+	lines.append("Счёт студии: %d ₽" % Game.money)
+	_contract_label.text = "\n".join(lines)
 
 
 func local_id() -> int:

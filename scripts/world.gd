@@ -16,6 +16,7 @@ var stations: Array = []
 var assembler: Node3D = null
 var items_root: Node3D = null
 var tray: Node3D = null
+var board: Label3D = null
 
 
 func _ready() -> void:
@@ -30,6 +31,7 @@ func _ready() -> void:
 	_build_stations()
 	_build_assembler()
 	_build_tray()
+	_build_board()
 
 
 func get_spawn_point(index: int) -> Vector3:
@@ -42,6 +44,28 @@ func tray_position() -> Vector3:
 
 func tray_slot(i: int) -> Vector3:
 	return tray_position() + Vector3(-0.65 + float(i) * 0.26, 1.05, 0)
+
+
+func _build_board() -> void:
+	board = Label3D.new()
+	board.text = "ждём контракт..."
+	board.position = tray_position() + Vector3(0, 2.7, 0)
+	board.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	board.pixel_size = 0.008
+	board.outline_size = 10
+	board.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	add_child(board)
+
+
+## Доска задач над лотком: что именно просит издатель.
+func set_board(c: Dictionary) -> void:
+	if board == null or c.is_empty():
+		return
+	var need: Dictionary = c["need"]
+	board.text = "%s\nнужно:  Код %d   ·   Графика %d   ·   Музыка %d\nсрок: %d недель   ·   гонорар %d ₽" % [
+		String(c["title"]),
+		int(need.get("code", 0)), int(need.get("art", 0)), int(need.get("music", 0)),
+		int(c["weeks"]), int(c["pay"])]
 
 
 func _build_env() -> void:

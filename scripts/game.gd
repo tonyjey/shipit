@@ -5,7 +5,7 @@ extends Node
 const ItemScript := preload("res://scripts/item.gd")
 
 const DISCIPLINES := ["code", "art", "music"]
-const TOKENS_PER_TASK := 4
+const TOKENS_PER_TASK := 6
 const TRAY_PERIOD := 5.0
 const TRAY_MAX := 6
 
@@ -17,6 +17,21 @@ const WORDS := {
 	"music": ["TEMPO", "CHORD", "BEAT", "BASS", "SNARE", "FADE", "TONE", "MIX", "REVERB", "SWING"],
 }
 
+const WEEK_SECONDS := 90.0
+
+const CONTRACTS := [
+	{"title": "Слэшер / Средневековье", "need": {"code": 2, "art": 2, "music": 2}, "weeks": 3, "pay": 1200},
+	{"title": "Платформер / Космос", "need": {"code": 3, "art": 2, "music": 1}, "weeks": 3, "pay": 1300},
+	{"title": "Хоррор / Особняк", "need": {"code": 2, "art": 3, "music": 2}, "weeks": 4, "pay": 1600},
+	{"title": "Ритм-игра / Неон", "need": {"code": 2, "art": 2, "music": 3}, "weeks": 4, "pay": 1500},
+]
+
+var contract: Dictionary = {}
+var contract_time := 0.0
+var contract_running := false
+var delivered_by: Dictionary = {"code": 0, "art": 0, "music": 0}
+var money := 0
+
 var items: Dictionary = {}
 var work: Dictionary = {}      # idx -> {disc, tokens, done, mistakes, occupant}
 var delivered := 0
@@ -24,6 +39,7 @@ var quality_sum := 0.0
 
 var _next_id := 1
 var _tray_timer := 2.0
+var _sync_timer := 1.0
 
 
 func _is_server() -> bool:
@@ -40,14 +56,32 @@ func reset() -> void:
 	quality_sum = 0.0
 	_next_id = 1
 	_tray_timer = 2.0
+	contract = {}
+	contract_time = 0.0
+	contract_running = false
+	delivered_by = {"code": 0, "art": 0, "music": 0}
 	if Boot.terminal:
 		Boot.terminal.close()
+	if Boot.results:
+		Boot.results.close()
 
 
 func _process(delta: float) -> void:
-	if Boot.world == null or not _is_server():
+	if Boot.world == null:
+		return
+	if contract_running:
+		contract_time += delta
+		Boot.update_contract_hud()
+	if not _is_server():
 		return
 	_tick_tray(delta)
+	if contract_running:
+		_sync_timer -= delta
+		if _sync_timer <= 0.0:
+			_sync_timer = 1.0
+			_bcast("rpc_contract_time", [contract_time])
+		if contract_time >= deadline_seconds():
+			_server_finish(false)
 
 
 # ---------------------------------------------------------------- ЛОТОК
@@ -57,11 +91,64 @@ func _tick_tray(delta: float) -> void:
 	if _tray_timer > 0.0:
 		return
 	_tray_timer = TRAY_PERIOD
+	if not contract_running:
+		return
 	var n := _tray_count()
 	if n >= TRAY_MAX:
 		return
-	var disc: String = DISCIPLINES.pick_random()
+	var disc := _neediest_discipline()
+	if disc == "":
+		return
 	server_spawn_item("ticket_" + disc, Boot.world.tray_slot(n))
+
+
+## Какой дисциплины не хватает сильнее всего с учётом того,
+## что уже лежит в мире и делается за столами.
+func _neediest_discipline() -> String:
+	var best := ""
+	var best_gap := 0
+	for k in DISCIPLINES:
+		var gap := need_of(k) - int(delivered_by[k]) - _in_flight(k)
+		if gap > best_gap:
+			best_gap = gap
+			best = k
+	return best
+
+
+func _in_flight(disc: String) -> int:
+	var n := 0
+	for it in items.values():
+		if String(it.kind).ends_with(disc):
+			n += 1
+	for idx in work.keys():
+		if String(work[idx]["disc"]) == disc:
+			n += 1
+	return n
+
+
+func need_of(disc: String) -> int:
+	if contract.is_empty():
+		return 0
+	return int(contract["need"].get(disc, 0))
+
+
+func deadline_seconds() -> float:
+	if contract.is_empty():
+		return 0.0
+	return float(contract["weeks"]) * WEEK_SECONDS
+
+
+func current_week() -> int:
+	return mini(int(contract_time / WEEK_SECONDS) + 1, int(contract["weeks"]) if not contract.is_empty() else 1)
+
+
+func requirements_met() -> bool:
+	if contract.is_empty():
+		return false
+	for k in DISCIPLINES:
+		if int(delivered_by[k]) < need_of(k):
+			return false
+	return true
 
 
 func _tray_count() -> int:
@@ -104,7 +191,10 @@ func server_send_snapshot(to_id: int) -> void:
 		rpc_id(to_id, "rpc_work_begin", int(idx), String(w["disc"]), w["tokens"], 0)
 		rpc_id(to_id, "rpc_work_progress", int(idx), int(w["done"]))
 		rpc_id(to_id, "rpc_work_occupant", int(idx), int(w["occupant"]))
-	rpc_id(to_id, "rpc_delivered", delivered, quality_sum)
+	if contract_running:
+		rpc_id(to_id, "rpc_contract_start", contract)
+		rpc_id(to_id, "rpc_contract_time", contract_time)
+	rpc_id(to_id, "rpc_delivered_sync", delivered, quality_sum, delivered_by)
 
 
 # ---------------------------------------------------------------- ЗАПРОСЫ
@@ -194,11 +284,17 @@ func _server_interact(pid: int, type: String, id: int) -> void:
 			_bcast("rpc_work_begin", [id, String(st.discipline), _make_tokens(String(st.discipline)), pid])
 
 		"assembler":
-			if held == null or not String(held.kind).begins_with("asset_"):
+			if held == null:
+				# пустые руки: если всё готово — можно сдать игру досрочно
+				if contract_running and requirements_met():
+					_server_finish(true)
+				return
+			if not String(held.kind).begins_with("asset_"):
 				return
 			var q: float = float(held.quality)
+			var disc := String(held.kind).substr(6)
 			_bcast("rpc_item_remove", [held.item_id])
-			_bcast("rpc_delivered", [delivered + 1, quality_sum + q])
+			_bcast("rpc_delivered", [delivered + 1, quality_sum + q, disc])
 
 
 func _server_drop(pid: int) -> void:
@@ -248,6 +344,8 @@ func _make_tokens(disc: String) -> Array:
 	var out: Array = []
 	for i in TOKENS_PER_TASK:
 		out.append(String(pool[randi() % pool.size()]))
+	# короткие вперёд — сложность нарастает внутри задачи
+	out.sort_custom(func(a, b): return String(a).length() < String(b).length())
 	return out
 
 
@@ -341,11 +439,126 @@ func rpc_work_end(idx: int) -> void:
 
 
 @rpc("authority", "call_local", "reliable")
-func rpc_delivered(n: int, q_sum: float) -> void:
+func rpc_delivered(n: int, q_sum: float, disc: String) -> void:
 	delivered = n
 	quality_sum = q_sum
+	if delivered_by.has(disc):
+		delivered_by[disc] = int(delivered_by[disc]) + 1
 	if Boot.world and Boot.world.assembler:
 		Boot.world.assembler.set_count(n, avg_quality())
+	Boot.update_contract_hud()
+
+
+# ---------------------------------------------------------------- КОНТРАКТ
+
+func server_start_contract() -> void:
+	if not _is_server():
+		return
+	var c: Dictionary = CONTRACTS[randi() % CONTRACTS.size()].duplicate(true)
+	var mult := maxi(Boot.players.size(), 1)
+	var need: Dictionary = c["need"]
+	for k in need.keys():
+		need[k] = int(need[k]) * mult
+	_bcast("rpc_contract_start", [c])
+
+
+func request_new_contract() -> void:
+	if _is_server():
+		_server_new_contract()
+	else:
+		rpc_id(1, "_req_new_contract")
+
+
+@rpc("any_peer", "reliable")
+func _req_new_contract() -> void:
+	if _is_server():
+		_server_new_contract()
+
+
+func _server_new_contract() -> void:
+	if contract_running:
+		return
+	_bcast("rpc_clear_round", [])
+	server_start_contract()
+
+
+func _server_finish(early: bool) -> void:
+	if not _is_server() or not contract_running:
+		return
+	var need: Dictionary = contract["need"]
+	var need_total := 0
+	var got_total := 0
+	for k in need.keys():
+		need_total += int(need[k])
+		got_total += mini(int(delivered_by[k]), int(need[k]))
+	var completeness := float(got_total) / float(maxi(need_total, 1))
+	var q := 0.0
+	if delivered > 0:
+		q = avg_quality()
+	var bonus := 0.0
+	if early:
+		bonus = clampf((1.0 - contract_time / maxf(deadline_seconds(), 1.0)) * 0.15, 0.0, 0.15)
+	var score := int(round(100.0 * clampf(0.60 * completeness + 0.32 * q + bonus, 0.0, 1.0)))
+	var pay := int(round(float(contract["pay"]) * float(score) / 100.0))
+	_bcast("rpc_contract_end", [score, pay, completeness, q, early])
+
+
+@rpc("authority", "call_local", "reliable")
+func rpc_contract_start(c: Dictionary) -> void:
+	contract = c.duplicate(true)
+	contract_time = 0.0
+	contract_running = true
+	delivered = 0
+	quality_sum = 0.0
+	delivered_by = {"code": 0, "art": 0, "music": 0}
+	if Boot.results:
+		Boot.results.close()
+	if Boot.world:
+		Boot.world.set_board(contract)
+		if Boot.world.assembler:
+			Boot.world.assembler.set_count(0, 1.0)
+	Boot.update_contract_hud()
+	Boot.toast("Новый контракт: %s" % String(contract["title"]), 5.0)
+
+
+@rpc("authority", "call_local", "reliable")
+func rpc_contract_time(t: float) -> void:
+	contract_time = t
+
+
+@rpc("authority", "call_local", "reliable")
+func rpc_contract_end(score: int, pay: int, completeness: float, quality: float, early: bool) -> void:
+	contract_running = false
+	money += pay
+	if Boot.terminal:
+		Boot.terminal.close()
+	if Boot.results:
+		Boot.results.show_result(String(contract["title"]), score, completeness, quality, pay, money, early)
+	Boot.update_contract_hud()
+
+
+@rpc("authority", "call_local", "reliable")
+func rpc_clear_round() -> void:
+	for it in items.values():
+		if is_instance_valid(it):
+			it.queue_free()
+	items.clear()
+	for idx in work.keys():
+		if Boot.world and int(idx) < Boot.world.stations.size():
+			Boot.world.stations[idx].clear_work()
+	work.clear()
+	if Boot.terminal:
+		Boot.terminal.close()
+
+
+@rpc("authority", "call_local", "reliable")
+func rpc_delivered_sync(n: int, q_sum: float, by: Dictionary) -> void:
+	delivered = n
+	quality_sum = q_sum
+	delivered_by = by.duplicate()
+	if Boot.world and Boot.world.assembler:
+		Boot.world.assembler.set_count(n, avg_quality())
+	Boot.update_contract_hud()
 
 
 # ---------------------------------------------------------------- ХЕЛПЕРЫ
@@ -364,7 +577,11 @@ func held_item_of(pid: int):
 
 
 func is_local_busy() -> bool:
-	return Boot.terminal != null and Boot.terminal.active
+	if Boot.terminal != null and Boot.terminal.active:
+		return true
+	if Boot.results != null and Boot.results.active:
+		return true
+	return false
 
 
 func title_of(kind: String) -> String:

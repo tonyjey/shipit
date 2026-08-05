@@ -161,8 +161,13 @@ func _local_step(delta: float) -> void:
 
 	move_and_slide()
 	if Game.is_local_busy():
-		Boot.set_prompt("Идёт работа — печатай токены.   Esc — отойти")
+		if Boot.terminal and Boot.terminal.active:
+			Boot.set_prompt("Идёт работа — печатай токены.   Esc — отойти")
+		else:
+			Boot.set_prompt("")
+		Boot.set_hint("")
 		_focus = null
+		return
 	else:
 		_update_focus()
 
