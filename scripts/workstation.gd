@@ -7,9 +7,8 @@ var discipline := "code"
 var title := "Код"
 var color := Color.WHITE
 
-var _busy := false
-var _left := 0.0
-var _total := 1.0
+var _total := 0
+var _done := 0
 var _bar: MeshInstance3D
 var _screen_mat: StandardMaterial3D
 
@@ -90,26 +89,19 @@ func output_position() -> Vector3:
 	return global_position + Vector3(0, 0.98, 0.32)
 
 
-func begin_work(duration: float) -> void:
-	_busy = true
-	_total = maxf(duration, 0.01)
-	_left = duration
+func set_work(total: int, done: int) -> void:
+	_total = maxi(total, 1)
+	_done = done
 	_bar.visible = true
-	_bar.scale.x = 0.01
+	_bar.scale.x = maxf(float(_done) / float(_total), 0.02)
 	_screen_mat.emission_energy_multiplier = 1.6
 
 
-func end_work() -> void:
-	_busy = false
+func clear_work() -> void:
+	_total = 0
+	_done = 0
 	_bar.visible = false
 	_screen_mat.emission_energy_multiplier = 0.5
-
-
-func _process(delta: float) -> void:
-	if not _busy:
-		return
-	_left = maxf(_left - delta, 0.0)
-	_bar.scale.x = maxf(1.0 - _left / _total, 0.01)
 
 
 func can_focus(_p) -> bool:
@@ -117,13 +109,20 @@ func can_focus(_p) -> bool:
 
 
 func get_prompt(p) -> String:
-	if _busy:
-		return "%s — в работе (%.1f с)" % [title, _left]
+	if Game.work.has(index):
+		var w: Dictionary = Game.work[index]
+		var occ := int(w["occupant"])
+		var toks: Array = w["tokens"]
+		if occ == 0:
+			return "[E] Продолжить работу — %s (%d/%d)" % [title, int(w["done"]), toks.size()]
+		if occ == int(p.peer_id):
+			return "%s — ты работаешь здесь" % title
+		return "%s — занято игроком P%d" % [title, int(Boot.slots.get(occ, occ))]
 	var h = Game.held_item_of(p.peer_id)
 	if h == null:
 		return "%s — принеси тикет из лотка" % title
-	if h.kind == "ticket_" + discipline:
-		return "[E] Отдать в работу — %s" % title
+	if String(h.kind) == "ticket_" + discipline:
+		return "[E] Сесть за работу — %s" % title
 	return "%s — нужен другой тикет" % title
 
 

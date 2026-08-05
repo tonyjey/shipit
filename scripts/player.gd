@@ -98,7 +98,7 @@ func _build_camera() -> void:
 # ---------------------------------------------------------------- ВВОД
 
 func _unhandled_input(event: InputEvent) -> void:
-	if not is_local:
+	if not is_local or Game.is_local_busy():
 		return
 	if event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
 		yaw -= event.relative.x * SENS
@@ -148,11 +148,11 @@ func _local_step(delta: float) -> void:
 
 	if not is_on_floor():
 		velocity.y -= _gravity * delta
-	elif Input.is_action_just_pressed("jump") and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
+	elif Input.is_action_just_pressed("jump") and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED and not Game.is_local_busy():
 		velocity.y = JUMP_FORCE
 
 	var input_dir := Vector2.ZERO
-	if Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
+	if Input.mouse_mode == Input.MOUSE_MODE_CAPTURED and not Game.is_local_busy():
 		input_dir = Input.get_vector("move_left", "move_right", "move_forward", "move_back")
 	var dir := (transform.basis * Vector3(input_dir.x, 0, input_dir.y)).normalized()
 	var target := dir * SPEED
@@ -160,7 +160,11 @@ func _local_step(delta: float) -> void:
 	velocity.z = move_toward(velocity.z, target.z, ACCEL * delta * 4.0)
 
 	move_and_slide()
-	_update_focus()
+	if Game.is_local_busy():
+		Boot.set_prompt("Идёт работа — печатай токены.   Esc — отойти")
+		_focus = null
+	else:
+		_update_focus()
 
 
 ## Выбор цели по близости и направлению взгляда — надёжнее луча

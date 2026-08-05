@@ -2,11 +2,13 @@ extends Node
 ## Точка входа. Автозагрузка "Boot".
 ## Отвечает за: ввод, меню, сеть, спавн игроков, HUD.
 
+const VERSION := "v0.3.1"
 const PORT := 7777
 const MAX_PLAYERS := 4
 
 const PlayerScript := preload("res://scripts/player.gd")
 const WorldScript := preload("res://scripts/world.gd")
+const TerminalScript := preload("res://scripts/terminal.gd")
 
 const COLORS := [
 	Color(0.95, 0.36, 0.36),
@@ -20,6 +22,7 @@ var players: Dictionary = {}     # peer_id -> Player
 var slots: Dictionary = {}       # peer_id -> 1..4
 var ready_peers: Array = []      # кому уже можно слать состояние
 var in_game := false
+var terminal = null
 
 var _hud: CanvasLayer = null
 var _menu: Control = null
@@ -59,6 +62,7 @@ func _setup_input() -> void:
 	_bind("interact", KEY_E)
 	_bind("drop", KEY_Q)
 	_bind("free_mouse", KEY_ESCAPE)
+	_bind("debug_info", KEY_F1)
 
 
 func _bind(action: String, key: Key) -> void:
@@ -85,6 +89,7 @@ func _mk_label(size: int) -> Label:
 func _build_ui() -> void:
 	_hud = CanvasLayer.new()
 	_hud.name = "HUD"
+	_hud.layer = 100
 	get_tree().root.add_child(_hud)
 
 	# подсказка взаимодействия — чуть ниже центра
@@ -104,6 +109,23 @@ func _build_ui() -> void:
 	_toast.vertical_alignment = VERTICAL_ALIGNMENT_TOP
 	_toast.offset_top = 50
 	_hud.add_child(_toast)
+
+	# значок версии — если его не видно, значит 2D-интерфейс не рисуется вообще
+	var badge := Label.new()
+	badge.set_anchors_preset(Control.PRESET_TOP_LEFT)
+	badge.position = Vector2(14, 10)
+	badge.size = Vector2(320, 26)
+	badge.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	badge.text = "Ship It! %s   [F1] диагностика" % VERSION
+	badge.add_theme_font_size_override("font_size", 15)
+	badge.add_theme_constant_override("outline_size", 6)
+	badge.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.85))
+	badge.add_theme_color_override("font_color", Color(0.85, 0.88, 0.95, 0.85))
+	_hud.add_child(badge)
+
+	# терминал мини-игры
+	terminal = TerminalScript.new()
+	_hud.add_child(terminal)
 
 	# меню
 	_menu = Control.new()
@@ -131,7 +153,7 @@ func _build_ui() -> void:
 	box.add_child(title)
 
 	var sub := Label.new()
-	sub.text = "прототип v0.2 — конвейер"
+	sub.text = "прототип %s — мини-игра" % VERSION
 	sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	box.add_child(sub)
 
@@ -301,6 +323,8 @@ func _enter_game() -> void:
 	get_tree().current_scene.add_child(world)
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	toast("WASD — ходить, E — взаимодействие, Q — бросить", 6.0)
+	if terminal:
+		terminal.close()
 
 
 func _leave_game() -> void:
@@ -332,6 +356,35 @@ func _spawn_player(id: int, slot: int) -> void:
 	players[id] = p
 	slots[id] = slot
 	world.add_child(p)
+
+
+func _unhandled_input(event: InputEvent) -> void:
+	if event.is_action_pressed("debug_info"):
+		dump_state()
+
+
+## Печатает состояние в панель Output. Нужно, чтобы диагностировать
+## проблемы, которые видно только на конкретной машине.
+func dump_state() -> void:
+	print("=========== SHIP IT ", VERSION, " ===========")
+	print("viewport      : ", get_tree().root.get_visible_rect().size)
+	print("HUD           : ", _hud, " visible=", _hud.visible if _hud else "нет", " layer=", _hud.layer if _hud else "-")
+	if _prompt:
+		print("prompt        : rect=", _prompt.get_global_rect(), " text='", _prompt.text, "'")
+	if _hint:
+		print("hint          : rect=", _hint.get_global_rect(), " text='", _hint.text, "'")
+	if terminal:
+		print("terminal      : active=", terminal.active, " visible=", terminal.visible,
+			" size=", terminal.size, " panel=", terminal._panel.get_global_rect() if terminal._panel else "нет")
+		print("               station=", terminal.station_idx, " tokens=", terminal.tokens, " done=", terminal.done)
+	print("in_game       : ", in_game, "  игроков: ", players.size(), "  ready_peers: ", ready_peers)
+	var lp = local_player()
+	if lp:
+		print("player        : pos=", lp.global_position, " focus=", lp._focus)
+	print("held item     : ", Game.held_item_of(local_id()))
+	print("предметов     : ", Game.items.size(), "  работа на столах: ", Game.work)
+	print("=========================================")
+	toast("Диагностика напечатана в панель Output", 3.0)
 
 
 func local_id() -> int:

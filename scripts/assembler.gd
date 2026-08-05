@@ -76,9 +76,9 @@ func _build() -> void:
 	add_child(_count_label)
 
 
-func set_count(n: int) -> void:
+func set_count(n: int, avg_quality := 1.0) -> void:
 	if _count_label:
-		_count_label.text = "Собрано: %d" % n
+		_count_label.text = "Собрано: %d    Качество: %d%%" % [n, int(round(avg_quality * 100.0))]
 	_flash = 0.6
 
 

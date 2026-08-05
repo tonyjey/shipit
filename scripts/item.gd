@@ -5,6 +5,7 @@ extends Node3D
 var item_id := 0
 var kind := "ticket_code"
 var holder := 0
+var quality := 1.0
 var start_pos := Vector3.ZERO
 var target_pos := Vector3.ZERO
 
@@ -39,7 +40,10 @@ func _build() -> void:
 	add_child(mesh)
 
 	var label := Label3D.new()
-	label.text = Game.title_of(kind)
+	if kind.begins_with("asset_"):
+		label.text = "%s  %d%%" % [Game.title_of(kind), int(round(quality * 100.0))]
+	else:
+		label.text = Game.title_of(kind)
 	label.position = Vector3(0, 0.36, 0)
 	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 	label.pixel_size = 0.005
