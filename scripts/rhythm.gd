@@ -129,7 +129,7 @@ func _press(lane: int) -> void:
 		_advance()
 	else:
 		mistakes_batch += 1
-		_miss_flash = 0.2
+		_miss_flash = 0.35
 	queue_redraw()
 
 
@@ -155,7 +155,7 @@ func _process(delta: float) -> void:
 	# нота, которую прозевали: считаем промах, но песня идёт дальше
 	if done < tokens.size() and _t > hit_time(done) + HIT_WINDOW:
 		mistakes_batch += 1
-		_miss_flash = 0.2
+		_miss_flash = 0.35
 		_advance()
 	queue_redraw()
 
@@ -178,6 +178,15 @@ func _draw() -> void:
 			HORIZONTAL_ALIGNMENT_CENTER, PANEL_W, 20, Color(0.85, 0.88, 0.95))
 		draw_string(_font, _origin + Vector2(0, 58), "нота %d из %d" % [mini(done + 1, tokens.size()), tokens.size()],
 			HORIZONTAL_ALIGNMENT_CENTER, PANEL_W, 15, Color(0.60, 0.64, 0.72))
+
+	if _font:
+		var m := Game.mistakes_of(station_idx) + mistakes_batch
+		var q := int(round(Game.quality_for(m) * 100.0))
+		var scol := Color(0.55, 0.85, 0.60)
+		if m > 0:
+			scol = Color(1.0, 0.62, 0.45)
+		draw_string(_font, _origin + Vector2(0, 58), "ошибок: %d   ·   качество ~%d%%" % [m, q],
+			HORIZONTAL_ALIGNMENT_RIGHT, PANEL_W - 20.0, 15, scol)
 
 	var pad := 60.0
 	var lane_w := (PANEL_W - pad * 2.0) / float(LANES)

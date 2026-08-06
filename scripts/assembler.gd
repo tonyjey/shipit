@@ -1,7 +1,7 @@
 extends StaticBody3D
 ## Сборочная машина в центре офиса. Сюда несут готовые ассеты.
 
-var _count_label: Label3D
+var _count_labels: Array = []
 var _lamp_mat: StandardMaterial3D
 var _flash := 0.0
 
@@ -59,26 +59,32 @@ func _build() -> void:
 	lamp.position = Vector3(0.9, 1.6, 0.85)
 	add_child(lamp)
 
-	var title := Label3D.new()
-	title.text = "СБОРКА"
-	title.position = Vector3(0, 2.25, 0)
-	title.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	title.pixel_size = 0.008
-	title.outline_size = 8
-	add_child(title)
+	# машина стоит посреди комнаты, поэтому подписи вешаем с двух сторон,
+	# а не разворачиваем их за игроком
+	for side in [0.0, 180.0]:
+		var title := Label3D.new()
+		title.text = "СБОРКА"
+		title.position = Vector3(0, 2.25, 0)
+		title.rotation_degrees = Vector3(0, side, 0)
+		title.billboard = BaseMaterial3D.BILLBOARD_DISABLED
+		title.pixel_size = 0.008
+		title.outline_size = 8
+		add_child(title)
 
-	_count_label = Label3D.new()
-	_count_label.text = "Собрано: 0"
-	_count_label.position = Vector3(0, 1.98, 0)
-	_count_label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	_count_label.pixel_size = 0.006
-	_count_label.outline_size = 8
-	add_child(_count_label)
+		var cnt := Label3D.new()
+		cnt.text = "Собрано: 0"
+		cnt.position = Vector3(0, 1.98, 0)
+		cnt.rotation_degrees = Vector3(0, side, 0)
+		cnt.billboard = BaseMaterial3D.BILLBOARD_DISABLED
+		cnt.pixel_size = 0.006
+		cnt.outline_size = 8
+		add_child(cnt)
+		_count_labels.append(cnt)
 
 
 func set_count(n: int, avg_quality := 1.0) -> void:
-	if _count_label:
-		_count_label.text = "Собрано: %d    Качество: %d%%" % [n, int(round(avg_quality * 100.0))]
+	for l in _count_labels:
+		l.text = "Собрано: %d    Качество: %d%%" % [n, int(round(avg_quality * 100.0))]
 	_flash = 0.6
 
 

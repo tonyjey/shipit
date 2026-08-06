@@ -29,6 +29,8 @@ var _origin := Vector2.ZERO
 var _grid_origin := Vector2.ZERO
 var _pal_origin := Vector2.ZERO
 var _miss_flash := 0.0
+var _bad_cell := -1
+var _bad_time := 0.0
 var _pulse := 0.0
 var _font: Font = null
 
@@ -146,20 +148,21 @@ func _click(pos: Vector2) -> void:
 		if brush == target_color(done):
 			_advance()
 		else:
-			_miss(true)
+			_miss(target_cell)
 		return
 
 	# клик по любой другой клетке спрайта — тоже промах
 	for i in range(done, tokens.size()):
 		if cell_rect(cell_of(i)).has_point(pos):
-			_miss(true)
+			_miss(cell_of(i))
 			return
 
 
-func _miss(flash: bool) -> void:
+func _miss(cell: int) -> void:
 	mistakes_batch += 1
-	if flash:
-		_miss_flash = 0.22
+	_miss_flash = 0.45
+	_bad_cell = cell
+	_bad_time = 0.45
 	queue_redraw()
 
 
@@ -179,10 +182,27 @@ func _process(delta: float) -> void:
 	_pulse += delta * 4.0
 	if _miss_flash > 0.0:
 		_miss_flash -= delta
+	if _bad_time > 0.0:
+		_bad_time -= delta
+		if _bad_time <= 0.0:
+			_bad_cell = -1
 	queue_redraw()
 
 
 # ---------------------------------------------------------------- ОТРИСОВКА
+
+## Ошибки и текущее качество показываем всегда, а не вспышкой на четверть секунды.
+func _draw_stats() -> void:
+	if _font == null:
+		return
+	var m := Game.mistakes_of(station_idx) + mistakes_batch
+	var q := int(round(Game.quality_for(m) * 100.0))
+	var col := Color(0.55, 0.85, 0.60)
+	if m > 0:
+		col = Color(1.0, 0.62, 0.45)
+	draw_string(_font, _origin + Vector2(0, 60), "ошибок: %d   ·   качество ~%d%%" % [m, q],
+		HORIZONTAL_ALIGNMENT_RIGHT, PANEL_W - 20.0, 15, col)
+
 
 func _draw() -> void:
 	if not active:
@@ -219,6 +239,15 @@ func _draw() -> void:
 		var a := 0.55 + 0.45 * sin(_pulse)
 		draw_rect(cur.grow(3.0), Color(1, 1, 1, a), false, 3.0)
 
+	# клетка, по которой промахнулись: красная заливка и крест
+	if _bad_cell >= 0 and _bad_time > 0.0:
+		var br := cell_rect(_bad_cell)
+		var a := clampf(_bad_time / 0.45, 0.0, 1.0)
+		draw_rect(br, Color(1.0, 0.30, 0.30, 0.45 * a), true)
+		draw_rect(br, Color(1.0, 0.35, 0.35, a), false, 3.0)
+		draw_line(br.position + Vector2(12, 12), br.end - Vector2(12, 12), Color(1, 1, 1, a), 3.0)
+		draw_line(Vector2(br.end.x - 12, br.position.y + 12), Vector2(br.position.x + 12, br.end.y - 12), Color(1, 1, 1, a), 3.0)
+
 	# палитра
 	for i in PALETTE.size():
 		var pr := Rect2(_pal_origin + Vector2(float(i) * 76.0, 0), Vector2(64, 64))
@@ -228,6 +257,8 @@ func _draw() -> void:
 		if _font:
 			draw_string(_font, pr.position + Vector2(0, 86), str(i + 1),
 				HORIZONTAL_ALIGNMENT_CENTER, 64, 17, Color(0.75, 0.78, 0.85))
+
+	_draw_stats()
 
 	if _font:
 		draw_string(_font, _origin + Vector2(0, PANEL_H - 14.0),

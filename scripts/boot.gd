@@ -2,7 +2,7 @@ extends Node
 ## Точка входа. Автозагрузка "Boot".
 ## Отвечает за: ввод, меню, сеть, спавн игроков, HUD.
 
-const VERSION := "v0.6"
+const VERSION := "v0.7"
 const PORT := 7777
 const MAX_PLAYERS := 4
 
@@ -186,7 +186,7 @@ func _build_ui() -> void:
 	box.add_child(title)
 
 	var sub := Label.new()
-	sub.text = "прототип %s — три мини-игры" % VERSION
+	sub.text = "прототип %s" % VERSION
 	sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	box.add_child(sub)
 
@@ -216,6 +216,16 @@ func _build_ui() -> void:
 	_status.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_status.add_theme_color_override("font_color", Color(1, 0.6, 0.4))
 	box.add_child(_status)
+
+	# свои адреса, чтобы было что продиктовать напарнику
+	var ip_info := Label.new()
+	ip_info.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	ip_info.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	ip_info.custom_minimum_size = Vector2(380, 0)
+	ip_info.add_theme_font_size_override("font_size", 14)
+	ip_info.add_theme_color_override("font_color", Color(0.60, 0.64, 0.72))
+	ip_info.text = "Твои адреса для друга: %s\nПорт 7777 (UDP)" % ", ".join(local_ips())
+	box.add_child(ip_info)
 
 
 func set_prompt(text: String) -> void:
@@ -251,7 +261,7 @@ func _host() -> void:
 	_enter_game()
 	ready_peers = [1]
 	_spawn_player(1, 1)
-	toast("Комната создана. Порт %d" % PORT)
+	toast("Комната создана. Твой адрес: %s   порт %d" % [", ".join(local_ips()), PORT], 8.0)
 	Game.server_start_contract()
 
 
@@ -468,6 +478,18 @@ func set_mouse_captured(v: bool) -> void:
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	else:
 		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+
+
+## Локальные IPv4 — их диктуют напарнику при игре по сети.
+func local_ips() -> Array:
+	var out: Array = []
+	for a in IP.get_local_addresses():
+		var addr := String(a)
+		if addr.count(".") == 3 and not addr.begins_with("127.") and not addr.begins_with("169.254."):
+			out.append(addr)
+	if out.is_empty():
+		out.append("не найдены")
+	return out
 
 
 func is_host() -> bool:

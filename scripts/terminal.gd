@@ -18,6 +18,7 @@ var _panel: PanelContainer
 var _title: Label
 var _log: Label
 var _current: RichTextLabel
+var _stats: Label
 var _hint: Label
 var _flash := 0.0
 
@@ -65,6 +66,11 @@ func _build() -> void:
 	_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_title.add_theme_font_size_override("font_size", 20)
 	box.add_child(_title)
+
+	_stats = Label.new()
+	_stats.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_stats.add_theme_font_size_override("font_size", 15)
+	box.add_child(_stats)
 
 	_log = Label.new()
 	_log.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -171,7 +177,7 @@ func _type_char(ch: String) -> void:
 	else:
 		mistakes_batch += 1
 		typed = maxi(typed - 1, 0)
-		_flash = 0.25
+		_flash = 0.45
 	_redraw()
 
 
@@ -187,6 +193,13 @@ func _process(delta: float) -> void:
 func _redraw() -> void:
 	if not active:
 		return
+
+	var m := Game.mistakes_of(station_idx) + mistakes_batch
+	_stats.text = "ошибок: %d   ·   качество ~%d%%" % [m, int(round(Game.quality_for(m) * 100.0))]
+	if m > 0:
+		_stats.add_theme_color_override("font_color", Color(1.0, 0.62, 0.45))
+	else:
+		_stats.add_theme_color_override("font_color", Color(0.55, 0.85, 0.60))
 
 	var lines: PackedStringArray = []
 	for i in tokens.size():

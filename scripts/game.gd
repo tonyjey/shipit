@@ -202,7 +202,7 @@ func server_send_snapshot(to_id: int) -> void:
 	for idx in work.keys():
 		var w: Dictionary = work[idx]
 		rpc_id(to_id, "rpc_work_begin", int(idx), String(w["disc"]), w["tokens"], 0)
-		rpc_id(to_id, "rpc_work_progress", int(idx), int(w["done"]))
+		rpc_id(to_id, "rpc_work_progress", int(idx), int(w["done"]), int(w["mistakes"]))
 		rpc_id(to_id, "rpc_work_occupant", int(idx), int(w["occupant"]))
 	if contract_running:
 		rpc_id(to_id, "rpc_contract_start", contract)
@@ -362,11 +362,11 @@ func _server_token(pid: int, idx: int, mistakes: int) -> void:
 
 	var toks: Array = w["tokens"]
 	if int(w["done"]) < toks.size():
-		_bcast("rpc_work_progress", [idx, int(w["done"])])
+		_bcast("rpc_work_progress", [idx, int(w["done"]), int(w["mistakes"])])
 		return
 
 	var disc: String = String(w["disc"])
-	var quality := clampf(1.0 - float(w["mistakes"]) * 0.09, 0.25, 1.0)
+	var quality := quality_for(int(w["mistakes"]))
 	var st = Boot.world.stations[idx]
 	_bcast("rpc_work_end", [idx])
 	server_spawn_item("asset_" + disc, st.output_position(), quality)
@@ -480,10 +480,11 @@ func rpc_work_begin(idx: int, disc: String, tokens: Array, occupant: int) -> voi
 
 
 @rpc("authority", "call_local", "reliable")
-func rpc_work_progress(idx: int, done: int) -> void:
+func rpc_work_progress(idx: int, done: int, mistakes: int) -> void:
 	if not work.has(idx):
 		return
 	work[idx]["done"] = done
+	work[idx]["mistakes"] = mistakes
 	var toks: Array = work[idx]["tokens"]
 	Boot.world.stations[idx].set_work(toks.size(), done)
 	var panel = Boot.active_panel()
@@ -660,6 +661,18 @@ func avg_quality() -> float:
 	if delivered <= 0:
 		return 1.0
 	return quality_sum / float(delivered)
+
+
+## Единая формула: одна ошибка стоит 9% качества, ниже 25% не падаем.
+func quality_for(mistakes: int) -> float:
+	return clampf(1.0 - float(mistakes) * 0.09, 0.25, 1.0)
+
+
+## Сколько ошибок уже накоплено на этом столе (для показа в панели).
+func mistakes_of(idx: int) -> int:
+	if not work.has(idx):
+		return 0
+	return int(work[idx]["mistakes"])
 
 
 func held_item_of(pid: int):

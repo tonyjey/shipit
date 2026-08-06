@@ -35,7 +35,7 @@ func _ready() -> void:
 
 
 func get_spawn_point(index: int) -> Vector3:
-	return Vector3(-2.4 + index * 1.6, 1.2, 7.4)
+	return Vector3(-2.4 + index * 1.6, 1.2, 3.4)
 
 
 func tray_position() -> Vector3:
@@ -47,11 +47,23 @@ func tray_slot(i: int) -> Vector3:
 
 
 func _build_board() -> void:
+	# Доска висит на дальней стене за столами и никуда не поворачивается:
+	# игрок почти всё время смотрит в эту сторону.
+	var panel := MeshInstance3D.new()
+	var pm := BoxMesh.new()
+	pm.size = Vector3(9.5, 2.8, 0.15)
+	panel.mesh = pm
+	var pmat := StandardMaterial3D.new()
+	pmat.albedo_color = Color(0.16, 0.18, 0.24)
+	panel.material_override = pmat
+	panel.position = Vector3(0, 3.3, -ROOM * 0.5 + 0.4)
+	add_child(panel)
+
 	board = Label3D.new()
 	board.text = "ждём контракт..."
-	board.position = Vector3(0, 3.0, ROOM * 0.5 - 0.45)
-	board.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	board.pixel_size = 0.0052
+	board.position = Vector3(0, 3.3, -ROOM * 0.5 + 0.5)
+	board.billboard = BaseMaterial3D.BILLBOARD_DISABLED
+	board.pixel_size = 0.012
 	board.outline_size = 10
 	board.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	add_child(board)
@@ -190,7 +202,8 @@ func _build_tray() -> void:
 	var label := Label3D.new()
 	label.text = "ЛОТОК ЗАДАЧ"
 	label.position = Vector3(0, 1.75, 0)
-	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	label.rotation_degrees = Vector3(0, 180, 0)   # лицом в комнату
+	label.billboard = BaseMaterial3D.BILLBOARD_DISABLED
 	label.pixel_size = 0.0045
 	label.outline_size = 8
 	tray.add_child(label)
