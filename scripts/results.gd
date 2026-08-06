@@ -96,7 +96,7 @@ func show_result(title: String, score: int, completeness: float, quality: float,
 	else:
 		lines.append("Сдано в последний день")
 	lines.append("")
-	lines.append("Гонорар: %d ₽     На счету: %d ₽" % [pay, money])
+	lines.append("Гонорар: $%d     На счету: $%d" % [pay, money])
 	_body.text = "\n".join(lines)
 
 	if Boot.is_host():

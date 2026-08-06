@@ -161,7 +161,9 @@ func _local_step(delta: float) -> void:
 
 	move_and_slide()
 	if Game.is_local_busy():
-		if Boot.terminal and Boot.terminal.active:
+		if Boot.rhythm and Boot.rhythm.active:
+			Boot.set_prompt("Лови ноты клавишами D F J K.   Esc — отойти")
+		elif Boot.terminal and Boot.terminal.active:
 			Boot.set_prompt("Идёт работа — печатай токены.   Esc — отойти")
 		else:
 			Boot.set_prompt("")

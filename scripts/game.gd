@@ -6,6 +6,7 @@ const ItemScript := preload("res://scripts/item.gd")
 
 const DISCIPLINES := ["code", "art", "music"]
 const TOKENS_PER_TASK := 6
+const NOTES_PER_TASK := 8
 const TRAY_PERIOD := 5.0
 const TRAY_MAX := 6
 
@@ -20,10 +21,10 @@ const WORDS := {
 const WEEK_SECONDS := 90.0
 
 const CONTRACTS := [
-	{"title": "Слэшер / Средневековье", "need": {"code": 2, "art": 2, "music": 2}, "weeks": 3, "pay": 1200},
-	{"title": "Платформер / Космос", "need": {"code": 3, "art": 2, "music": 1}, "weeks": 3, "pay": 1300},
-	{"title": "Хоррор / Особняк", "need": {"code": 2, "art": 3, "music": 2}, "weeks": 4, "pay": 1600},
-	{"title": "Ритм-игра / Неон", "need": {"code": 2, "art": 2, "music": 3}, "weeks": 4, "pay": 1500},
+	{"title": "Слэшер / Средневековье", "need": {"code": 3, "art": 3, "music": 3}, "weeks": 3, "pay": 1800},
+	{"title": "Платформер / Космос", "need": {"code": 4, "art": 3, "music": 2}, "weeks": 3, "pay": 1800},
+	{"title": "Хоррор / Особняк", "need": {"code": 3, "art": 4, "music": 3}, "weeks": 3, "pay": 2000},
+	{"title": "Ритм-игра / Неон", "need": {"code": 3, "art": 2, "music": 5}, "weeks": 3, "pay": 2000},
 ]
 
 var contract: Dictionary = {}
@@ -63,8 +64,7 @@ func reset() -> void:
 	delivered_by = {"code": 0, "art": 0, "music": 0}
 	difficulty = 0
 	money = 0
-	if Boot.terminal:
-		Boot.terminal.close()
+	Boot.close_panels(-1)
 	if Boot.results:
 		Boot.results.close()
 
@@ -315,21 +315,32 @@ func _server_drop(pid: int) -> void:
 
 ## Куда реально положить предмет: если впереди стол или машина,
 ## кладём перед препятствием, а не внутрь него.
+## Куда реально положить предмет. Проверяем сферой несколько точек перед
+## игроком и берём первую свободную — один луч не ловил углы и боковины машины.
 func safe_drop_point(p: Node3D, fwd: Vector3) -> Vector3:
-	var from := p.global_position + Vector3(0, 0.9, 0)
-	var to := from + fwd * 1.15
-	var pos := to
+	var flat := Vector3(fwd.x, 0.0, fwd.z)
+	if flat.length() < 0.01:
+		flat = Vector3(0, 0, -1)
+	flat = flat.normalized()
+
 	var space := p.get_world_3d().direct_space_state
-	var q := PhysicsRayQueryParameters3D.create(from, to)
-	q.exclude = [p.get_rid()]
-	var hit := space.intersect_ray(q)
-	if not hit.is_empty():
-		pos = (hit["position"] as Vector3) - fwd * 0.45
-	pos.y = 0.35
-	var lim := 8.6
-	pos.x = clampf(pos.x, -lim, lim)
-	pos.z = clampf(pos.z, -lim, lim)
-	return pos
+	var shape := SphereShape3D.new()
+	shape.radius = 0.32
+	var params := PhysicsShapeQueryParameters3D.new()
+	params.shape = shape
+	params.collide_with_bodies = true
+	params.exclude = [p.get_rid()]
+
+	for d in [1.1, 0.85, 0.6, 0.35, 0.0]:
+		var pos: Vector3 = p.global_position + flat * float(d)
+		pos.y = 0.42
+		params.transform = Transform3D(Basis(), pos)
+		if space.intersect_shape(params, 1).is_empty():
+			return pos
+
+	var fallback := p.global_position
+	fallback.y = 0.42
+	return fallback
 
 
 func _server_token(pid: int, idx: int, mistakes: int) -> void:
@@ -362,8 +373,18 @@ func _server_leave(pid: int, idx: int) -> void:
 
 
 func _make_tokens(disc: String) -> Array:
-	var pool: Array = WORDS[disc]
 	var out: Array = []
+	# музыка играется как ритм-игра: токен = номер дорожки
+	if disc == "music":
+		var last := -1
+		for i in NOTES_PER_TASK:
+			var lane := randi() % 4
+			if lane == last and randf() < 0.6:
+				lane = (lane + 1 + randi() % 3) % 4
+			last = lane
+			out.append(str(lane))
+		return out
+	var pool: Array = WORDS[disc]
 	for i in TOKENS_PER_TASK:
 		out.append(String(pool[randi() % pool.size()]))
 	# короткие вперёд — сложность нарастает внутри задачи
@@ -422,8 +443,10 @@ func rpc_work_begin(idx: int, disc: String, tokens: Array, occupant: int) -> voi
 		return
 	work[idx] = {"disc": disc, "tokens": tokens.duplicate(), "done": 0, "mistakes": 0, "occupant": occupant}
 	Boot.world.stations[idx].set_work(tokens.size(), 0)
-	if occupant == Boot.local_id() and Boot.terminal:
-		Boot.terminal.open(idx, disc, tokens, 0)
+	if occupant == Boot.local_id():
+		var panel = Boot.panel_for(disc)
+		if panel:
+			panel.open(idx, disc, tokens, 0)
 
 
 @rpc("authority", "call_local", "reliable")
@@ -433,8 +456,9 @@ func rpc_work_progress(idx: int, done: int) -> void:
 	work[idx]["done"] = done
 	var toks: Array = work[idx]["tokens"]
 	Boot.world.stations[idx].set_work(toks.size(), done)
-	if Boot.terminal and Boot.terminal.active and Boot.terminal.station_idx == idx:
-		Boot.terminal.sync_progress(done)
+	var panel = Boot.active_panel()
+	if panel and panel.station_idx == idx:
+		panel.sync_progress(done)
 
 
 @rpc("authority", "call_local", "reliable")
@@ -442,13 +466,15 @@ func rpc_work_occupant(idx: int, occupant: int) -> void:
 	if not work.has(idx):
 		return
 	work[idx]["occupant"] = occupant
-	if Boot.terminal == null:
-		return
+	var w: Dictionary = work[idx]
 	if occupant == Boot.local_id():
-		var w: Dictionary = work[idx]
-		Boot.terminal.open(idx, String(w["disc"]), w["tokens"], int(w["done"]))
-	elif Boot.terminal.station_idx == idx:
-		Boot.terminal.close()
+		var panel = Boot.panel_for(String(w["disc"]))
+		if panel:
+			panel.open(idx, String(w["disc"]), w["tokens"], int(w["done"]))
+	else:
+		var open_panel = Boot.active_panel()
+		if open_panel and open_panel.station_idx == idx:
+			open_panel.close()
 
 
 @rpc("authority", "call_local", "reliable")
@@ -456,8 +482,7 @@ func rpc_work_end(idx: int) -> void:
 	work.erase(idx)
 	if Boot.world and idx < Boot.world.stations.size():
 		Boot.world.stations[idx].clear_work()
-	if Boot.terminal and Boot.terminal.station_idx == idx:
-		Boot.terminal.close()
+	Boot.close_panels(idx)
 
 
 @rpc("authority", "call_local", "reliable")
@@ -484,8 +509,8 @@ func server_start_contract() -> void:
 	for k in need.keys():
 		base_total += int(need[k])
 
-	# каждый закрытый контракт добавляет одну задачу, но не больше шести
-	for i in mini(difficulty, 6):
+	# каждый закрытый контракт добавляет две задачи, но не больше десяти
+	for i in mini(difficulty * 2, 10):
 		var k: String = order[i % order.size()]
 		need[k] = int(need[k]) + 1
 
@@ -570,8 +595,7 @@ func rpc_contract_end(score: int, pay: int, completeness: float, quality: float,
 	contract_running = false
 	money += pay
 	difficulty += 1
-	if Boot.terminal:
-		Boot.terminal.close()
+	Boot.close_panels(-1)
 	if Boot.results:
 		Boot.results.show_result(String(contract["title"]), score, completeness, quality, pay, money, early)
 	Boot.update_contract_hud()
@@ -587,8 +611,7 @@ func rpc_clear_round() -> void:
 		if Boot.world and int(idx) < Boot.world.stations.size():
 			Boot.world.stations[idx].clear_work()
 	work.clear()
-	if Boot.terminal:
-		Boot.terminal.close()
+	Boot.close_panels(-1)
 
 
 @rpc("authority", "call_local", "reliable")
@@ -617,7 +640,7 @@ func held_item_of(pid: int):
 
 
 func is_local_busy() -> bool:
-	if Boot.terminal != null and Boot.terminal.active:
+	if Boot.active_panel() != null:
 		return true
 	if Boot.results != null and Boot.results.active:
 		return true

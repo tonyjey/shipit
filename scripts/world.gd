@@ -62,7 +62,7 @@ func set_board(c: Dictionary) -> void:
 	if board == null or c.is_empty():
 		return
 	var need: Dictionary = c["need"]
-	board.text = "КОНТРАКТ №%d   ·   %s\nнужно:  Код %d   ·   Графика %d   ·   Музыка %d\nсрок: %d недель   ·   гонорар %d ₽" % [
+	board.text = "КОНТРАКТ №%d   ·   %s\nнужно:  Код %d   ·   Графика %d   ·   Музыка %d\nсрок: %d недель   ·   гонорар $%d" % [
 		int(c.get("index", 1)), String(c["title"]),
 		int(need.get("code", 0)), int(need.get("art", 0)), int(need.get("music", 0)),
 		int(c["weeks"]), int(c["pay"])]

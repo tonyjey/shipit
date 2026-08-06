@@ -2,7 +2,7 @@ extends Node
 ## Точка входа. Автозагрузка "Boot".
 ## Отвечает за: ввод, меню, сеть, спавн игроков, HUD.
 
-const VERSION := "v0.4.1"
+const VERSION := "v0.5"
 const PORT := 7777
 const MAX_PLAYERS := 4
 
@@ -10,6 +10,7 @@ const PlayerScript := preload("res://scripts/player.gd")
 const WorldScript := preload("res://scripts/world.gd")
 const TerminalScript := preload("res://scripts/terminal.gd")
 const ResultsScript := preload("res://scripts/results.gd")
+const RhythmScript := preload("res://scripts/rhythm.gd")
 
 const COLORS := [
 	Color(0.95, 0.36, 0.36),
@@ -24,6 +25,7 @@ var slots: Dictionary = {}       # peer_id -> 1..4
 var ready_peers: Array = []      # кому уже можно слать состояние
 var in_game := false
 var terminal = null
+var rhythm = null
 var results = null
 var _contract_label: Label = null
 
@@ -143,6 +145,10 @@ func _build_ui() -> void:
 	terminal = TerminalScript.new()
 	_hud.add_child(terminal)
 
+	# ритм-игра для стола «Музыка»
+	rhythm = RhythmScript.new()
+	_hud.add_child(rhythm)
+
 	# экран сдачи игры
 	results = ResultsScript.new()
 	_hud.add_child(results)
@@ -173,7 +179,7 @@ func _build_ui() -> void:
 	box.add_child(title)
 
 	var sub := Label.new()
-	sub.text = "прототип %s — контракты" % VERSION
+	sub.text = "прототип %s — две мини-игры" % VERSION
 	sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	box.add_child(sub)
 
@@ -399,9 +405,11 @@ func dump_state() -> void:
 	if _hint:
 		print("hint          : rect=", _hint.get_global_rect(), " text='", _hint.text, "'")
 	if terminal:
-		print("terminal      : active=", terminal.active, " visible=", terminal.visible,
-			" size=", terminal.size, " panel=", terminal._panel.get_global_rect() if terminal._panel else "нет")
-		print("               station=", terminal.station_idx, " tokens=", terminal.tokens, " done=", terminal.done)
+		print("terminal      : active=", terminal.active, " station=", terminal.station_idx,
+			" tokens=", terminal.tokens, " done=", terminal.done)
+	if rhythm:
+		print("rhythm        : active=", rhythm.active, " station=", rhythm.station_idx,
+			" notes=", rhythm.tokens, " done=", rhythm.done)
 	print("in_game       : ", in_game, "  игроков: ", players.size(), "  ready_peers: ", ready_peers)
 	var lp = local_player()
 	if lp:
@@ -412,6 +420,31 @@ func dump_state() -> void:
 	print("сдано         : ", Game.delivered_by, "  деньги: ", Game.money)
 	print("=========================================")
 	toast("Диагностика напечатана в панель Output", 3.0)
+
+
+## Какая мини-игра стоит на столе этой дисциплины.
+func panel_for(disc: String):
+	if disc == "music":
+		return rhythm
+	return terminal
+
+
+## Открытая сейчас мини-игра, если она есть.
+func active_panel():
+	if terminal != null and terminal.active:
+		return terminal
+	if rhythm != null and rhythm.active:
+		return rhythm
+	return null
+
+
+## Закрыть панели: idx < 0 — все, иначе только привязанные к этому столу.
+func close_panels(idx: int) -> void:
+	for panel in [terminal, rhythm]:
+		if panel == null:
+			continue
+		if idx < 0 or panel.station_idx == idx:
+			panel.close()
 
 
 func is_host() -> bool:
@@ -428,15 +461,17 @@ func update_contract_hud() -> void:
 	lines.append("Контракт №%d  ·  %s" % [int(Game.contract.get("index", 1)), String(Game.contract["title"])])
 	if Game.contract_running:
 		var left := maxf(Game.deadline_seconds() - Game.contract_time, 0.0)
+		var mins := floori(left / 60.0)
+		var secs := int(left) % 60
 		lines.append("Неделя %d из %d   ·   осталось %d:%02d" % [
-			Game.current_week(), int(Game.contract["weeks"]), int(left) / 60, int(left) % 60])
+			Game.current_week(), int(Game.contract["weeks"]), mins, secs])
 	else:
 		lines.append("контракт закрыт")
 	lines.append("Код %d/%d   Графика %d/%d   Музыка %d/%d" % [
 		int(Game.delivered_by["code"]), Game.need_of("code"),
 		int(Game.delivered_by["art"]), Game.need_of("art"),
 		int(Game.delivered_by["music"]), Game.need_of("music")])
-	lines.append("Счёт студии: %d ₽" % Game.money)
+	lines.append("Счёт студии: $%d" % Game.money)
 	_contract_label.text = "\n".join(lines)
 
 
