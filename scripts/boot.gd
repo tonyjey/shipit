@@ -2,7 +2,7 @@ extends Node
 ## Точка входа. Автозагрузка "Boot".
 ## Отвечает за: ввод, меню, сеть, спавн игроков, HUD.
 
-const VERSION := "v0.5"
+const VERSION := "v0.6"
 const PORT := 7777
 const MAX_PLAYERS := 4
 
@@ -11,6 +11,7 @@ const WorldScript := preload("res://scripts/world.gd")
 const TerminalScript := preload("res://scripts/terminal.gd")
 const ResultsScript := preload("res://scripts/results.gd")
 const RhythmScript := preload("res://scripts/rhythm.gd")
+const PaintScript := preload("res://scripts/paint.gd")
 
 const COLORS := [
 	Color(0.95, 0.36, 0.36),
@@ -26,6 +27,8 @@ var ready_peers: Array = []      # кому уже можно слать сос�
 var in_game := false
 var terminal = null
 var rhythm = null
+var paint = null
+var mouse_wanted := false
 var results = null
 var _contract_label: Label = null
 
@@ -149,6 +152,10 @@ func _build_ui() -> void:
 	rhythm = RhythmScript.new()
 	_hud.add_child(rhythm)
 
+	# раскраска для стола «Графика»
+	paint = PaintScript.new()
+	_hud.add_child(paint)
+
 	# экран сдачи игры
 	results = ResultsScript.new()
 	_hud.add_child(results)
@@ -179,7 +186,7 @@ func _build_ui() -> void:
 	box.add_child(title)
 
 	var sub := Label.new()
-	sub.text = "прототип %s — две мини-игры" % VERSION
+	sub.text = "прототип %s — три мини-игры" % VERSION
 	sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	box.add_child(sub)
 
@@ -349,7 +356,7 @@ func _enter_game() -> void:
 	world = WorldScript.new()
 	world.name = "World"
 	get_tree().current_scene.add_child(world)
-	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+	set_mouse_captured(true)
 	toast("WASD — ходить, E — взаимодействие, Q — бросить", 6.0)
 	if terminal:
 		terminal.close()
@@ -368,7 +375,7 @@ func _leave_game() -> void:
 	_menu.visible = true
 	set_prompt("")
 	set_hint("")
-	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+	set_mouse_captured(false)
 
 
 func _spawn_player(id: int, slot: int) -> void:
@@ -410,6 +417,9 @@ func dump_state() -> void:
 	if rhythm:
 		print("rhythm        : active=", rhythm.active, " station=", rhythm.station_idx,
 			" notes=", rhythm.tokens, " done=", rhythm.done)
+	if paint:
+		print("paint         : active=", paint.active, " station=", paint.station_idx,
+			" cells=", paint.tokens, " done=", paint.done, " brush=", paint.brush)
 	print("in_game       : ", in_game, "  игроков: ", players.size(), "  ready_peers: ", ready_peers)
 	var lp = local_player()
 	if lp:
@@ -426,6 +436,8 @@ func dump_state() -> void:
 func panel_for(disc: String):
 	if disc == "music":
 		return rhythm
+	if disc == "art":
+		return paint
 	return terminal
 
 
@@ -435,16 +447,27 @@ func active_panel():
 		return terminal
 	if rhythm != null and rhythm.active:
 		return rhythm
+	if paint != null and paint.active:
+		return paint
 	return null
 
 
 ## Закрыть панели: idx < 0 — все, иначе только привязанные к этому столу.
 func close_panels(idx: int) -> void:
-	for panel in [terminal, rhythm]:
+	for panel in [terminal, rhythm, paint]:
 		if panel == null:
 			continue
 		if idx < 0 or panel.station_idx == idx:
 			panel.close()
+
+
+## Единая точка управления курсором: панели и меню дёргают только её.
+func set_mouse_captured(v: bool) -> void:
+	mouse_wanted = v
+	if v:
+		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+	else:
+		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 
 
 func is_host() -> bool:

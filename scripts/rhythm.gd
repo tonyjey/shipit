@@ -6,10 +6,11 @@ extends Control
 ## дорожки. Поэтому вся серверная логика (прогресс, пауза, качество) переиспользуется.
 
 const PANEL_W := 560.0
-const PANEL_H := 360.0
+const PANEL_H := 470.0
 const LANES := 4
 const NOTE_INTERVAL := 0.80    # секунд между нотами
 const APPROACH := 1.7          # сколько нота летит до линии
+const LEAD_IN := 2.2           # разгон: пауза перед первой нотой
 const HIT_WINDOW := 0.24       # допуск попадания в обе стороны
 
 const LANE_KEYS := [KEY_D, KEY_F, KEY_J, KEY_K]
@@ -80,7 +81,12 @@ func sync_progress(done_count: int) -> void:
 
 
 func hit_time(i: int) -> float:
-	return APPROACH + float(i - _base) * NOTE_INTERVAL
+	return LEAD_IN + APPROACH + float(i - _base) * NOTE_INTERVAL
+
+
+## Сколько секунд осталось до старта. Больше нуля — идёт обратный отсчёт.
+func countdown() -> float:
+	return maxf(LEAD_IN - _t, 0.0)
 
 
 func lane_of(i: int) -> int:
@@ -193,6 +199,15 @@ func _draw() -> void:
 	# линия попадания
 	draw_line(Vector2(_origin.x + pad, line_y), Vector2(_origin.x + PANEL_W - pad, line_y),
 		Color(1, 1, 1, 0.55), 2.0)
+
+	# обратный отсчёт перед первой нотой
+	var cd := countdown()
+	if cd > 0.0 and _font:
+		var n := int(ceil(cd))
+		draw_string(_font, Vector2(_origin.x, top + (line_y - top) * 0.45), str(n),
+			HORIZONTAL_ALIGNMENT_CENTER, PANEL_W, 64, Color(1.0, 1.0, 1.0, 0.85))
+		draw_string(_font, Vector2(_origin.x, top + (line_y - top) * 0.45 + 34.0), "приготовься",
+			HORIZONTAL_ALIGNMENT_CENTER, PANEL_W, 16, Color(0.70, 0.74, 0.82))
 
 	# летящие ноты
 	for i in range(done, mini(done + 4, tokens.size())):

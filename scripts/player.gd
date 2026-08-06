@@ -100,17 +100,14 @@ func _build_camera() -> void:
 func _unhandled_input(event: InputEvent) -> void:
 	if not is_local or Game.is_local_busy():
 		return
-	if event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
+	if event is InputEventMouseMotion and Boot.mouse_wanted:
 		yaw -= event.relative.x * SENS
 		pitch = clampf(pitch - event.relative.y * SENS, -1.2, 0.5)
 		if _spring:
 			_spring.rotation.x = pitch
 	if event.is_action_pressed("free_mouse"):
-		if Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
-			Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
-		else:
-			Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
-	if Input.mouse_mode != Input.MOUSE_MODE_CAPTURED:
+		Boot.set_mouse_captured(not Boot.mouse_wanted)
+	if not Boot.mouse_wanted:
 		return
 	if event.is_action_pressed("interact"):
 		_do_interact()
@@ -148,11 +145,11 @@ func _local_step(delta: float) -> void:
 
 	if not is_on_floor():
 		velocity.y -= _gravity * delta
-	elif Input.is_action_just_pressed("jump") and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED and not Game.is_local_busy():
+	elif Input.is_action_just_pressed("jump") and Boot.mouse_wanted and not Game.is_local_busy():
 		velocity.y = JUMP_FORCE
 
 	var input_dir := Vector2.ZERO
-	if Input.mouse_mode == Input.MOUSE_MODE_CAPTURED and not Game.is_local_busy():
+	if Boot.mouse_wanted and not Game.is_local_busy():
 		input_dir = Input.get_vector("move_left", "move_right", "move_forward", "move_back")
 	var dir := (transform.basis * Vector3(input_dir.x, 0, input_dir.y)).normalized()
 	var target := dir * SPEED
@@ -161,7 +158,9 @@ func _local_step(delta: float) -> void:
 
 	move_and_slide()
 	if Game.is_local_busy():
-		if Boot.rhythm and Boot.rhythm.active:
+		if Boot.paint and Boot.paint.active:
+			Boot.set_prompt("Выбери цвет (1-4) и кликай по клеткам.   Esc — отойти")
+		elif Boot.rhythm and Boot.rhythm.active:
 			Boot.set_prompt("Лови ноты клавишами D F J K.   Esc — отойти")
 		elif Boot.terminal and Boot.terminal.active:
 			Boot.set_prompt("Идёт работа — печатай токены.   Esc — отойти")

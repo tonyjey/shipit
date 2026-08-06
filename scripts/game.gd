@@ -7,6 +7,14 @@ const ItemScript := preload("res://scripts/item.gd")
 const DISCIPLINES := ["code", "art", "music"]
 const TOKENS_PER_TASK := 6
 const NOTES_PER_TASK := 8
+
+## Спрайты для стола «Графика»: сетка 4 в ширину, цифра — индекс цвета палитры.
+const SPRITES := [
+	[".11.", "1221", "1221", ".33."],
+	["0..0", ".22.", ".22.", "0330"],
+	[".00.", "0110", ".22.", "3..3"],
+	["11..", "1220", ".223", "..33"],
+]
 const TRAY_PERIOD := 5.0
 const TRAY_MAX := 6
 
@@ -384,6 +392,28 @@ func _make_tokens(disc: String) -> Array:
 			last = lane
 			out.append(str(lane))
 		return out
+	# графика — раскраска: токен это «клетка:цвет», идём цветами подряд,
+	# чтобы кисть приходилось менять три-четыре раза, а не на каждой клетке
+	if disc == "art":
+		var tpl: Array = SPRITES[randi() % SPRITES.size()]
+		var by_color: Dictionary = {}
+		for r in tpl.size():
+			var row: String = tpl[r]
+			for c in row.length():
+				var ch := row.substr(c, 1)
+				if ch == ".":
+					continue
+				var col := int(ch)
+				if not by_color.has(col):
+					by_color[col] = []
+				by_color[col].append(r * 4 + c)
+		var colors: Array = by_color.keys()
+		colors.shuffle()
+		for col in colors:
+			for cell in by_color[col]:
+				out.append("%d:%d" % [int(cell), int(col)])
+		return out
+
 	var pool: Array = WORDS[disc]
 	for i in TOKENS_PER_TASK:
 		out.append(String(pool[randi() % pool.size()]))
