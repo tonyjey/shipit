@@ -11,11 +11,13 @@ const NOTES_PER_TASK := 8
 
 # --- фаза тестирования
 const TESTING_SECONDS := 90.0     # одна неделя на отлов багов
-const REVEAL_TIME := 6.0
-const REVEAL_COOLDOWN := 4.0
-const BUG_SPEED := 2.0
-const BUG_SPEED_PANIC := 3.4
+const REVEAL_TIME := 10.0
+const REVEAL_COOLDOWN := 3.0
+const BUG_SPEED := 2.2            # невидимый баг бегает свободно
+const BUG_SPEED_REVEALED := 0.9   # подсвеченный «прижат» сканом и еле ползёт
 const BUG_PENALTY := 0.25         # максимальный вычет из оценки за багов
+const MISTAKES_PER_BUG := 2.0     # сколько опечаток порождает одного бага
+const MAX_BUGS := 12
 
 ## Спрайты для стола «Графика»: сетка 4 в ширину, цифра — индекс цвета палитры.
 const SPRITES := [
@@ -52,6 +54,7 @@ var testing_left := 0.0
 var bugs: Dictionary = {}
 var bugs_total := 0
 var bugs_caught := 0
+var round_mistakes := 0
 var reveal_left := 0.0
 var reveal_cooldown := 0.0
 
@@ -91,6 +94,7 @@ func reset() -> void:
 	quality_sum = 0.0
 	_next_id = 1
 	_tray_timer = 2.0
+	round_mistakes = 0
 	contract = {}
 	contract_time = 0.0
 	contract_running = false
@@ -230,7 +234,7 @@ func _tick_testing(delta: float) -> void:
 func _move_bugs(delta: float) -> void:
 	var speed := BUG_SPEED
 	if reveal_left > 0.0:
-		speed = BUG_SPEED_PANIC     # подсвеченный баг паникует и убегает быстрее
+		speed = BUG_SPEED_REVEALED  # скан прижимает бага к полу, его можно догнать
 	var lim := 8.4
 	for id in bugs.keys():
 		var b = bugs[id]
@@ -253,8 +257,13 @@ func _move_bugs(delta: float) -> void:
 func _server_start_testing() -> void:
 	if not _is_server() or testing or not contract_running:
 		return
-	var mult := maxi(Boot.players.size(), 1)
-	var n := mini((3 + difficulty) * mult, 14)
+	# Багов ровно столько, сколько наошибались за контракт.
+	# Чистая работа — чистый релиз, без выдуманных претензий от тестировщика.
+	var n := mini(int(round(float(round_mistakes) / MISTAKES_PER_BUG)), MAX_BUGS)
+	if n <= 0:
+		Boot.toast("Тестирование: багов не найдено. Релиз!", 4.0)
+		_server_finish(true)
+		return
 	var ids := PackedInt32Array()
 	var pos := PackedVector3Array()
 	for i in n:
@@ -557,6 +566,7 @@ func _server_token(pid: int, idx: int, mistakes: int, slot: int) -> void:
 		return
 
 	var disc: String = String(w["disc"])
+	round_mistakes += int(w["mistakes"])
 	var quality := quality_for(int(w["mistakes"]))
 	var st = Boot.world.stations[idx]
 	_bcast("rpc_work_end", [idx])
@@ -788,7 +798,9 @@ func _server_finish(early: bool) -> void:
 	var q := 0.0
 	if delivered > 0:
 		q = avg_quality()
-	var bug_ratio := 1.0
+	# без багов штрафа нет: раньше здесь по умолчанию стояла единица,
+	# и чистый релиз всё равно терял 25 очков
+	var bug_ratio := 0.0
 	if bugs_total > 0:
 		bug_ratio = float(bugs_left()) / float(bugs_total)
 	var bonus := 0.0
@@ -808,6 +820,8 @@ func rpc_contract_start(c: Dictionary) -> void:
 	delivered = 0
 	quality_sum = 0.0
 	delivered_by = {"code": 0, "art": 0, "music": 0}
+	round_mistakes = 0
+	_clear_bugs()
 	if Boot.results:
 		Boot.results.close()
 	if Boot.world:

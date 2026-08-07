@@ -55,25 +55,23 @@ func _build() -> void:
 
 func _process(delta: float) -> void:
 	if holder != 0 and Boot.players.has(holder):
+		# В руках предмет прикреплён жёстко. Раньше он догонял игрока
+		# интерполяцией: позиция отставала, а поворот применялся сразу,
+		# из-за чего подпись при развороте будто раздваивалась.
 		var p := Boot.players[holder] as Node3D
 		var fwd := -p.global_transform.basis.z
-		target_pos = p.global_position + fwd * 0.8 + Vector3(0, 0.15, 0)
+		global_position = p.global_position + fwd * 0.8 + Vector3(0, 0.15, 0)
+		target_pos = global_position
 		rotation.y = p.rotation.y
 	else:
 		_spin += delta * 1.2
 		rotation.y = _spin
-	global_position = global_position.lerp(target_pos, clampf(delta * 14.0, 0.0, 1.0))
-	# подписи показываем только рядом — иначе весь офис в тексте
-	if _label:
-		var me = Boot.local_player()
-		_label.visible = me != null and me.global_position.distance_to(global_position) < 3.5
+		global_position = global_position.lerp(target_pos, clampf(delta * 14.0, 0.0, 1.0))
+
 	# подписи предметов видно только рядом — иначе экран превращается в кашу
 	if _label:
 		var me = Boot.local_player()
-		if me == null:
-			_label.visible = false
-		else:
-			_label.visible = global_position.distance_to(me.global_position) < 3.6
+		_label.visible = me != null and global_position.distance_to(me.global_position) < 3.6
 
 
 func can_focus(p) -> bool:

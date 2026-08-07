@@ -2,7 +2,7 @@ extends Node
 ## Точка входа. Автозагрузка "Boot".
 ## Отвечает за: ввод, меню, сеть, спавн игроков, HUD.
 
-const VERSION := "v0.8"
+const VERSION := "v0.9"
 const PORT := 7777
 const MAX_PLAYERS := 4
 
@@ -29,6 +29,7 @@ var terminal = null
 var rhythm = null
 var paint = null
 var mouse_wanted := false
+var _crosshair: ColorRect = null
 var results = null
 var _contract_label: Label = null
 
@@ -53,6 +54,10 @@ func _ready() -> void:
 
 
 func _process(delta: float) -> void:
+	if _crosshair:
+		# прицел прячем, когда управление у панели или у меню
+		_crosshair.visible = in_game and mouse_wanted and active_panel() == null \
+			and not (results != null and results.active)
 	if _toast_time > 0.0:
 		_toast_time -= delta
 		if _toast_time <= 0.0 and _toast:
@@ -131,6 +136,16 @@ func _build_ui() -> void:
 	badge.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.85))
 	badge.add_theme_color_override("font_color", Color(0.85, 0.88, 0.95, 0.85))
 	_hud.add_child(badge)
+
+	# прицел — точка в центре экрана
+	_crosshair = ColorRect.new()
+	_crosshair.color = Color(1, 1, 1, 0.75)
+	_crosshair.set_anchors_preset(Control.PRESET_CENTER)
+	_crosshair.size = Vector2(5, 5)
+	_crosshair.position = Vector2(-2.5, -2.5)
+	_crosshair.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_crosshair.visible = false
+	_hud.add_child(_crosshair)
 
 	# сводка по контракту — правый верхний угол
 	_contract_label = Label.new()
