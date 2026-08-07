@@ -65,6 +65,8 @@ func _build() -> void:
 	label.text = title
 	label.position = Vector3(0, 1.7, -0.15)
 	label.billboard = BaseMaterial3D.BILLBOARD_DISABLED
+	label.double_sided = false
+	label.double_sided = false
 	label.pixel_size = 0.007
 	label.outline_size = 8
 	add_child(label)

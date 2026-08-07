@@ -20,6 +20,9 @@ var is_local := false
 var yaw := 0.0
 var pitch := -0.25
 
+var first_person := true
+var _mesh_nodes: Array = []
+var _tag: Label3D = null
 var _pivot: Node3D
 var _spring: SpringArm3D
 var _cam: Camera3D
@@ -60,6 +63,7 @@ func _build_body() -> void:
 	mesh.mesh = cm
 	mesh.material_override = mat
 	add_child(mesh)
+	_mesh_nodes.append(mesh)
 
 	var nose := MeshInstance3D.new()
 	var bm := BoxMesh.new()
@@ -68,6 +72,7 @@ func _build_body() -> void:
 	nose.material_override = mat
 	nose.position = Vector3(0, 0.45, -0.4)
 	add_child(nose)
+	_mesh_nodes.append(nose)
 
 	var label := Label3D.new()
 	label.text = "P%d" % slot
@@ -77,11 +82,12 @@ func _build_body() -> void:
 	label.pixel_size = 0.006
 	label.outline_size = 10
 	add_child(label)
+	_tag = label
 
 
 func _build_camera() -> void:
 	_pivot = Node3D.new()
-	_pivot.position = Vector3(0, 1.3, 0)
+	_pivot.position = Vector3(0, 0.65, 0)   # уровень глаз
 	add_child(_pivot)
 
 	_spring = SpringArm3D.new()
@@ -90,9 +96,27 @@ func _build_camera() -> void:
 	_pivot.add_child(_spring)
 
 	_cam = Camera3D.new()
-	_cam.position = Vector3(0.5, 0, 0)
 	_cam.current = true
 	_spring.add_child(_cam)
+	_apply_view()
+
+
+## Переключение вида. Первое лицо по умолчанию, третье остаётся по клавише V:
+## в кооперативе иногда важнее видеть себя и напарников, чем детали перед носом.
+func _apply_view() -> void:
+	if not is_local:
+		return
+	if _spring:
+		_spring.spring_length = 0.0 if first_person else 3.6
+	if _cam:
+		_cam.position = Vector3.ZERO if first_person else Vector3(0.5, 0, 0)
+	for m in _mesh_nodes:
+		if first_person:
+			m.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_SHADOWS_ONLY
+		else:
+			m.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
+	if _tag:
+		_tag.visible = not first_person
 
 
 # ---------------------------------------------------------------- ВВОД
@@ -105,6 +129,10 @@ func _unhandled_input(event: InputEvent) -> void:
 		pitch = clampf(pitch - event.relative.y * SENS, -1.2, 0.5)
 		if _spring:
 			_spring.rotation.x = pitch
+	if event.is_action_pressed("toggle_view"):
+		first_person = not first_person
+		_apply_view()
+		Boot.toast("Вид: %s" % ("от первого лица" if first_person else "от третьего лица"), 2.0)
 	if event.is_action_pressed("free_mouse"):
 		Boot.set_mouse_captured(not Boot.mouse_wanted)
 	if not Boot.mouse_wanted:

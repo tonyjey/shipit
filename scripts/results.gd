@@ -80,7 +80,7 @@ func _mk(font_size: int, col: Color) -> Label:
 	return l
 
 
-func show_result(title: String, score: int, completeness: float, quality: float, pay: int, money: int, early: bool) -> void:
+func show_result(title: String, score: int, completeness: float, quality: float, pay: int, money: int, early: bool, bug_left := 0, bug_total := 0) -> void:
 	active = true
 	visible = true
 	_layout()
@@ -91,6 +91,12 @@ func show_result(title: String, score: int, completeness: float, quality: float,
 	var lines: PackedStringArray = []
 	lines.append("Готовность контента: %d%%" % int(round(completeness * 100.0)))
 	lines.append("Качество исполнения: %d%%" % int(round(quality * 100.0)))
+	if bug_total <= 0:
+		lines.append("Тестирование не проводилось — минус 25 к оценке")
+	elif bug_left == 0:
+		lines.append("Все %d багов пойманы" % bug_total)
+	else:
+		lines.append("Багов осталось в игре: %d из %d" % [bug_left, bug_total])
 	if early:
 		lines.append("Сдано досрочно — бонус к оценке")
 	else:

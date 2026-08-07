@@ -61,21 +61,29 @@ func _build() -> void:
 
 	# машина стоит посреди комнаты, поэтому подписи вешаем с двух сторон,
 	# а не разворачиваем их за игроком
+	# Подписи вынесены на разные грани и односторонние: иначе задняя
+	# просвечивала сквозь корпус и накладывалась на переднюю.
 	for side in [0.0, 180.0]:
+		var z := 0.85
+		if side > 90.0:
+			z = -0.85
+
 		var title := Label3D.new()
 		title.text = "СБОРКА"
-		title.position = Vector3(0, 2.25, 0)
+		title.position = Vector3(0, 2.25, z)
 		title.rotation_degrees = Vector3(0, side, 0)
 		title.billboard = BaseMaterial3D.BILLBOARD_DISABLED
+		title.double_sided = false
 		title.pixel_size = 0.008
 		title.outline_size = 8
 		add_child(title)
 
 		var cnt := Label3D.new()
 		cnt.text = "Собрано: 0"
-		cnt.position = Vector3(0, 1.98, 0)
+		cnt.position = Vector3(0, 1.98, z)
 		cnt.rotation_degrees = Vector3(0, side, 0)
 		cnt.billboard = BaseMaterial3D.BILLBOARD_DISABLED
+		cnt.double_sided = false
 		cnt.pixel_size = 0.006
 		cnt.outline_size = 8
 		add_child(cnt)
@@ -104,8 +112,10 @@ func get_prompt(p) -> String:
 	var h = Game.held_item_of(p.peer_id)
 	if h != null and String(h.kind).begins_with("asset_"):
 		return "[E] Сдать в сборку — %s" % Game.title_of(h.kind)
+	if Game.testing:
+		return "Идёт тестирование — ловите багов"
 	if Game.contract_running and Game.requirements_met():
-		return "[E] СДАТЬ ИГРУ ИЗДАТЕЛЮ — всё готово досрочно"
+		return "[E] ОТПРАВИТЬ НА ТЕСТИРОВАНИЕ — контент готов"
 	return "Сборка — неси готовый ассет со стола"
 
 

@@ -3,10 +3,19 @@ extends Node
 ## Авторитет — сервер (хост). Клиенты просят, сервер решает и рассылает.
 
 const ItemScript := preload("res://scripts/item.gd")
+const BugScript := preload("res://scripts/bug.gd")
 
 const DISCIPLINES := ["code", "art", "music"]
 const TOKENS_PER_TASK := 6
 const NOTES_PER_TASK := 8
+
+# --- фаза тестирования
+const TESTING_SECONDS := 90.0     # одна неделя на отлов багов
+const REVEAL_TIME := 6.0
+const REVEAL_COOLDOWN := 4.0
+const BUG_SPEED := 2.0
+const BUG_SPEED_PANIC := 3.4
+const BUG_PENALTY := 0.25         # максимальный вычет из оценки за багов
 
 ## Спрайты для стола «Графика»: сетка 4 в ширину, цифра — индекс цвета палитры.
 const SPRITES := [
@@ -27,6 +36,9 @@ const WORDS := {
 }
 
 const WEEK_SECONDS := 90.0
+const BASE_PACE := 30.0     # секунд на задачу в первом контракте
+const MIN_PACE := 21.0      # к чему сходится темп при росте сложности
+const PACE_STEP := 1.2      # насколько поджимается темп за каждый контракт
 
 const CONTRACTS := [
 	{"title": "Слэшер / Средневековье", "need": {"code": 3, "art": 3, "music": 3}, "weeks": 3, "pay": 1800},
@@ -34,6 +46,19 @@ const CONTRACTS := [
 	{"title": "Хоррор / Особняк", "need": {"code": 3, "art": 4, "music": 3}, "weeks": 3, "pay": 2000},
 	{"title": "Ритм-игра / Неон", "need": {"code": 3, "art": 2, "music": 5}, "weeks": 3, "pay": 2000},
 ]
+
+var testing := false
+var testing_left := 0.0
+var bugs: Dictionary = {}
+var bugs_total := 0
+var bugs_caught := 0
+var reveal_left := 0.0
+var reveal_cooldown := 0.0
+
+var _bug_next_id := 1
+var _bug_dirs: Dictionary = {}
+var _bug_turn: Dictionary = {}
+var _bug_sync := 0.0
 
 var contract: Dictionary = {}
 var contract_time := 0.0
@@ -70,6 +95,7 @@ func reset() -> void:
 	contract_time = 0.0
 	contract_running = false
 	delivered_by = {"code": 0, "art": 0, "music": 0}
+	_clear_bugs()
 	difficulty = 0
 	money = 0
 	Boot.close_panels(-1)
@@ -83,8 +109,17 @@ func _process(delta: float) -> void:
 	if contract_running:
 		contract_time += delta
 		Boot.update_contract_hud()
+	if reveal_left > 0.0:
+		reveal_left = maxf(reveal_left - delta, 0.0)
+	if reveal_cooldown > 0.0:
+		reveal_cooldown = maxf(reveal_cooldown - delta, 0.0)
+	if testing:
+		testing_left = maxf(testing_left - delta, 0.0)
+		Boot.update_contract_hud()
 	if not _is_server():
 		return
+	if testing:
+		_tick_testing(delta)
 	_tick_tray(delta)
 	if contract_running:
 		_sync_timer -= delta
@@ -174,6 +209,141 @@ func _tray_count() -> int:
 
 # ---------------------------------------------------------------- ПРЕДМЕТЫ
 
+# ---------------------------------------------------------------- ТЕСТИРОВАНИЕ
+
+func _tick_testing(delta: float) -> void:
+	_move_bugs(delta)
+	_bug_sync -= delta
+	if _bug_sync <= 0.0:
+		_bug_sync = 0.2
+		var ids := PackedInt32Array()
+		var pos := PackedVector3Array()
+		for id in bugs.keys():
+			ids.append(int(id))
+			pos.append(bugs[id].target_pos)
+		if ids.size() > 0:
+			_bcast("rpc_bugs_pos", [ids, pos])
+	if testing_left <= 0.0:
+		_server_finish(false)
+
+
+func _move_bugs(delta: float) -> void:
+	var speed := BUG_SPEED
+	if reveal_left > 0.0:
+		speed = BUG_SPEED_PANIC     # подсвеченный баг паникует и убегает быстрее
+	var lim := 8.4
+	for id in bugs.keys():
+		var b = bugs[id]
+		_bug_turn[id] = float(_bug_turn.get(id, 0.0)) - delta
+		if float(_bug_turn[id]) <= 0.0:
+			_bug_turn[id] = randf_range(0.7, 1.8)
+			_bug_dirs[id] = Vector3(randf_range(-1.0, 1.0), 0.0, randf_range(-1.0, 1.0)).normalized()
+		var d: Vector3 = _bug_dirs.get(id, Vector3.FORWARD)
+		var np: Vector3 = b.target_pos + d * speed * delta
+		if absf(np.x) > lim or absf(np.z) > lim:
+			d = -d
+			_bug_dirs[id] = d
+			np = b.target_pos + d * speed * delta
+		np.x = clampf(np.x, -lim, lim)
+		np.z = clampf(np.z, -lim, lim)
+		np.y = 0.6
+		b.target_pos = np
+
+
+func _server_start_testing() -> void:
+	if not _is_server() or testing or not contract_running:
+		return
+	var mult := maxi(Boot.players.size(), 1)
+	var n := mini((3 + difficulty) * mult, 14)
+	var ids := PackedInt32Array()
+	var pos := PackedVector3Array()
+	for i in n:
+		ids.append(_bug_next_id)
+		_bug_next_id += 1
+		pos.append(Vector3(randf_range(-7.5, 7.5), 0.6, randf_range(-7.5, 7.5)))
+	_bcast("rpc_testing_start", [ids, pos, minf(TESTING_SECONDS, maxf(deadline_seconds() - contract_time, 15.0))])
+
+
+func request_reveal() -> void:
+	if _is_server():
+		_server_reveal()
+	else:
+		rpc_id(1, "_req_reveal")
+
+
+@rpc("any_peer", "reliable")
+func _req_reveal() -> void:
+	if _is_server():
+		_server_reveal()
+
+
+func _server_reveal() -> void:
+	if not testing or reveal_left > 0.0 or reveal_cooldown > 0.0:
+		return
+	_bcast("rpc_reveal", [REVEAL_TIME])
+
+
+func _clear_bugs() -> void:
+	for b in bugs.values():
+		if is_instance_valid(b):
+			b.queue_free()
+	bugs.clear()
+	_bug_dirs.clear()
+	_bug_turn.clear()
+	testing = false
+	testing_left = 0.0
+	bugs_total = 0
+	bugs_caught = 0
+	reveal_left = 0.0
+	reveal_cooldown = 0.0
+
+
+@rpc("authority", "call_local", "reliable")
+func rpc_testing_start(ids: PackedInt32Array, pos: PackedVector3Array, seconds: float) -> void:
+	_clear_bugs()
+	testing = true
+	testing_left = seconds
+	bugs_total = ids.size()
+	bugs_caught = 0
+	if Boot.world == null:
+		return
+	for i in ids.size():
+		var b := BugScript.new()
+		b.name = "bug_%d" % ids[i]
+		b.bug_id = ids[i]
+		b.start_pos = pos[i]
+		bugs[ids[i]] = b
+		Boot.world.bugs_root.add_child(b)
+	Boot.toast("ТЕСТИРОВАНИЕ: в игре %d багов. Подсвечивай их на QA-терминале и лови." % bugs_total, 7.0)
+
+
+@rpc("authority", "call_local", "unreliable_ordered")
+func rpc_bugs_pos(ids: PackedInt32Array, pos: PackedVector3Array) -> void:
+	for i in ids.size():
+		if bugs.has(ids[i]):
+			bugs[ids[i]].target_pos = pos[i]
+
+
+@rpc("authority", "call_local", "reliable")
+func rpc_reveal(duration: float) -> void:
+	reveal_left = duration
+	reveal_cooldown = duration + REVEAL_COOLDOWN
+	Boot.toast("Багов видно!", 2.0)
+
+
+@rpc("authority", "call_local", "reliable")
+func rpc_bug_caught(id: int, caught: int) -> void:
+	bugs_caught = caught
+	if bugs.has(id):
+		bugs[id].queue_free()
+		bugs.erase(id)
+	Boot.update_contract_hud()
+
+
+func bugs_left() -> int:
+	return maxi(bugs_total - bugs_caught, 0)
+
+
 func server_spawn_item(kind: String, pos: Vector3, quality := 1.0) -> int:
 	var id := _next_id
 	_next_id += 1
@@ -202,7 +372,7 @@ func server_send_snapshot(to_id: int) -> void:
 	for idx in work.keys():
 		var w: Dictionary = work[idx]
 		rpc_id(to_id, "rpc_work_begin", int(idx), String(w["disc"]), w["tokens"], 0)
-		rpc_id(to_id, "rpc_work_progress", int(idx), int(w["done"]), int(w["mistakes"]))
+		rpc_id(to_id, "rpc_work_progress", int(idx), int(w["done"]), int(w["mistakes"]), w["filled"])
 		rpc_id(to_id, "rpc_work_occupant", int(idx), int(w["occupant"]))
 	if contract_running:
 		rpc_id(to_id, "rpc_contract_start", contract)
@@ -226,11 +396,13 @@ func request_drop() -> void:
 		rpc_id(1, "_req_drop")
 
 
-func request_token(idx: int, mistakes: int) -> void:
+## slot — какой именно элемент задачи закрыт. Для терминала и ритма это
+## всегда следующий по порядку (-1), для раскраски — конкретная клетка.
+func request_token(idx: int, mistakes: int, slot := -1) -> void:
 	if _is_server():
-		_server_token(Boot.local_id(), idx, mistakes)
+		_server_token(Boot.local_id(), idx, mistakes, slot)
 	else:
-		rpc_id(1, "_req_token", idx, mistakes)
+		rpc_id(1, "_req_token", idx, mistakes, slot)
 
 
 func request_leave_station(idx: int) -> void:
@@ -253,9 +425,9 @@ func _req_drop() -> void:
 
 
 @rpc("any_peer", "reliable")
-func _req_token(idx: int, mistakes: int) -> void:
+func _req_token(idx: int, mistakes: int, slot: int) -> void:
 	if _is_server():
-		_server_token(multiplayer.get_remote_sender_id(), idx, mistakes)
+		_server_token(multiplayer.get_remote_sender_id(), idx, mistakes, slot)
 
 
 @rpc("any_peer", "reliable")
@@ -296,11 +468,23 @@ func _server_interact(pid: int, type: String, id: int) -> void:
 			_bcast("rpc_item_remove", [held.item_id])
 			_bcast("rpc_work_begin", [id, String(st.discipline), _make_tokens(String(st.discipline)), pid])
 
+		"bug":
+			if not testing or reveal_left <= 0.0 or not bugs.has(id):
+				return
+			_bcast("rpc_bug_caught", [id, bugs_caught + 1])
+			if bugs_caught + 1 >= bugs_total:
+				_server_finish(true)
+			return
+
+		"qa":
+			_server_reveal()
+			return
+
 		"assembler":
 			if held == null:
-				# пустые руки: если всё готово — можно сдать игру досрочно
-				if contract_running and requirements_met():
-					_server_finish(true)
+				# пустые руки: всё готово — отправляем на тестирование
+				if contract_running and not testing and requirements_met():
+					_server_start_testing()
 				return
 			if not String(held.kind).begins_with("asset_"):
 				return
@@ -351,18 +535,25 @@ func safe_drop_point(p: Node3D, fwd: Vector3) -> Vector3:
 	return fallback
 
 
-func _server_token(pid: int, idx: int, mistakes: int) -> void:
+func _server_token(pid: int, idx: int, mistakes: int, slot: int) -> void:
 	if not _is_server() or not work.has(idx):
 		return
 	var w: Dictionary = work[idx]
 	if int(w["occupant"]) != pid:
 		return
-	w["done"] = int(w["done"]) + 1
+	var filled: Array = w["filled"]
+	var s := slot
+	if s < 0:
+		s = filled.size()
+	if filled.has(s):
+		return
+	filled.append(s)
+	w["done"] = filled.size()
 	w["mistakes"] = int(w["mistakes"]) + maxi(mistakes, 0)
 
 	var toks: Array = w["tokens"]
 	if int(w["done"]) < toks.size():
-		_bcast("rpc_work_progress", [idx, int(w["done"]), int(w["mistakes"])])
+		_bcast("rpc_work_progress", [idx, int(w["done"]), int(w["mistakes"]), filled])
 		return
 
 	var disc: String = String(w["disc"])
@@ -471,7 +662,7 @@ func rpc_item_remove(id: int) -> void:
 func rpc_work_begin(idx: int, disc: String, tokens: Array, occupant: int) -> void:
 	if Boot.world == null or idx >= Boot.world.stations.size():
 		return
-	work[idx] = {"disc": disc, "tokens": tokens.duplicate(), "done": 0, "mistakes": 0, "occupant": occupant}
+	work[idx] = {"disc": disc, "tokens": tokens.duplicate(), "done": 0, "mistakes": 0, "occupant": occupant, "filled": []}
 	Boot.world.stations[idx].set_work(tokens.size(), 0)
 	if occupant == Boot.local_id():
 		var panel = Boot.panel_for(disc)
@@ -480,11 +671,12 @@ func rpc_work_begin(idx: int, disc: String, tokens: Array, occupant: int) -> voi
 
 
 @rpc("authority", "call_local", "reliable")
-func rpc_work_progress(idx: int, done: int, mistakes: int) -> void:
+func rpc_work_progress(idx: int, done: int, mistakes: int, filled: Array) -> void:
 	if not work.has(idx):
 		return
 	work[idx]["done"] = done
 	work[idx]["mistakes"] = mistakes
+	work[idx]["filled"] = filled.duplicate()
 	var toks: Array = work[idx]["tokens"]
 	Boot.world.stations[idx].set_work(toks.size(), done)
 	var panel = Boot.active_panel()
@@ -540,17 +732,23 @@ func server_start_contract() -> void:
 	for k in need.keys():
 		base_total += int(need[k])
 
-	# каждый закрытый контракт добавляет две задачи, но не больше десяти
-	for i in mini(difficulty * 2, 10):
+	# каждый закрытый контракт добавляет одну задачу, но не больше шести
+	for i in mini(difficulty, 6):
 		var k: String = order[i % order.size()]
 		need[k] = int(need[k]) + 1
 
-	# нагрузка растёт от числа игроков, срок — нет
+	# нагрузка растёт от числа игроков
 	var mult := maxi(Boot.players.size(), 1)
 	var total := 0
 	for k in need.keys():
 		need[k] = int(need[k]) * mult
 		total += int(need[k])
+
+	# Срок выводим из объёма: давление создаёт темп, а не стена.
+	# С каждым контрактом на задачу отводится чуть меньше секунд.
+	var pace := maxf(MIN_PACE, BASE_PACE - PACE_STEP * float(difficulty))
+	var per_player := float(total) / float(mult)
+	c["weeks"] = maxi(2, int(round(per_player * pace / WEEK_SECONDS)))
 
 	c["pay"] = int(round(float(c["pay"]) * float(total) / float(maxi(base_total * mult, 1))))
 	c["index"] = difficulty + 1
@@ -590,12 +788,16 @@ func _server_finish(early: bool) -> void:
 	var q := 0.0
 	if delivered > 0:
 		q = avg_quality()
+	var bug_ratio := 1.0
+	if bugs_total > 0:
+		bug_ratio = float(bugs_left()) / float(bugs_total)
 	var bonus := 0.0
 	if early:
 		bonus = clampf((1.0 - contract_time / maxf(deadline_seconds(), 1.0)) * 0.15, 0.0, 0.15)
-	var score := int(round(100.0 * clampf(0.60 * completeness + 0.32 * q + bonus, 0.0, 1.0)))
+	var score := int(round(100.0 * clampf(
+		0.60 * completeness + 0.32 * q + bonus - BUG_PENALTY * bug_ratio, 0.0, 1.0)))
 	var pay := int(round(float(contract["pay"]) * float(score) / 100.0))
-	_bcast("rpc_contract_end", [score, pay, completeness, q, early])
+	_bcast("rpc_contract_end", [score, pay, completeness, q, early, bugs_left(), bugs_total])
 
 
 @rpc("authority", "call_local", "reliable")
@@ -622,13 +824,14 @@ func rpc_contract_time(t: float) -> void:
 
 
 @rpc("authority", "call_local", "reliable")
-func rpc_contract_end(score: int, pay: int, completeness: float, quality: float, early: bool) -> void:
+func rpc_contract_end(score: int, pay: int, completeness: float, quality: float, early: bool, bug_left: int, bug_total: int) -> void:
 	contract_running = false
 	money += pay
 	difficulty += 1
 	Boot.close_panels(-1)
 	if Boot.results:
-		Boot.results.show_result(String(contract["title"]), score, completeness, quality, pay, money, early)
+		Boot.results.show_result(String(contract["title"]), score, completeness, quality, pay, money, early, bug_left, bug_total)
+	_clear_bugs()
 	Boot.update_contract_hud()
 
 
@@ -642,6 +845,7 @@ func rpc_clear_round() -> void:
 		if Boot.world and int(idx) < Boot.world.stations.size():
 			Boot.world.stations[idx].clear_work()
 	work.clear()
+	_clear_bugs()
 	Boot.close_panels(-1)
 
 
@@ -669,6 +873,14 @@ func quality_for(mistakes: int) -> float:
 
 
 ## Сколько ошибок уже накоплено на этом столе (для показа в панели).
+## Какие элементы задачи уже закрыты — нужно раскраске, чтобы поднять
+## работу с той же точки, если за стол сел другой игрок.
+func filled_of(idx: int) -> Array:
+	if not work.has(idx):
+		return []
+	return work[idx]["filled"]
+
+
 func mistakes_of(idx: int) -> int:
 	if not work.has(idx):
 		return 0

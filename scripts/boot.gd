@@ -2,7 +2,7 @@ extends Node
 ## Точка входа. Автозагрузка "Boot".
 ## Отвечает за: ввод, меню, сеть, спавн игроков, HUD.
 
-const VERSION := "v0.7"
+const VERSION := "v0.8"
 const PORT := 7777
 const MAX_PLAYERS := 4
 
@@ -70,6 +70,7 @@ func _setup_input() -> void:
 	_bind("interact", KEY_E)
 	_bind("drop", KEY_Q)
 	_bind("free_mouse", KEY_ESCAPE)
+	_bind("toggle_view", KEY_V)
 	_bind("debug_info", KEY_F1)
 
 
@@ -516,6 +517,11 @@ func update_contract_hud() -> void:
 		int(Game.delivered_by["code"]), Game.need_of("code"),
 		int(Game.delivered_by["art"]), Game.need_of("art"),
 		int(Game.delivered_by["music"]), Game.need_of("music")])
+	if Game.testing:
+		lines.append("ТЕСТИРОВАНИЕ · багов осталось %d из %d · %d с" % [
+			Game.bugs_left(), Game.bugs_total, int(Game.testing_left)])
+	elif Game.contract_running and Game.requirements_met():
+		lines.append("Контент готов — неси его на тестирование")
 	lines.append("Счёт студии: $%d" % Game.money)
 	_contract_label.text = "\n".join(lines)
 

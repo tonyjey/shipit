@@ -2,8 +2,11 @@ extends Control
 ## Мини-игра для стола «Графика»: раскраска спрайта.
 ##
 ## Третья мини-игра сознательно сделана на мыши, а не на клавиатуре:
-## терминал — последовательность, ритм — тайминг, раскраска — пространство.
-## Токен здесь — пара «клетка:цвет», всё остальное переиспользует общую логику работы.
+## терминал — последовательность, ритм — тайминг, раскраска — скорость.
+##
+## Порядок клеток свободный: бери кисть и крась всё, что ей подходит,
+## в любом порядке. Сервер помнит закрытые клетки, поэтому работу
+## можно бросить и подхватить с того же места.
 
 const PANEL_W := 560.0
 const PANEL_H := 500.0
@@ -24,6 +27,7 @@ var tokens: Array = []
 var done := 0
 var mistakes_batch := 0
 var brush := 0
+var filled: Dictionary = {}
 
 var _origin := Vector2.ZERO
 var _grid_origin := Vector2.ZERO
@@ -57,12 +61,15 @@ func _layout() -> void:
 
 # ---------------------------------------------------------------- УПРАВЛЕНИЕ
 
-func open(idx: int, _disc: String, toks: Array, done_count: int) -> void:
+func open(idx: int, _disc: String, toks: Array, _done_count: int) -> void:
 	station_idx = idx
 	tokens = toks.duplicate()
-	done = done_count
+	filled.clear()
+	for i in Game.filled_of(idx):
+		filled[int(i)] = true
+	done = filled.size()
 	mistakes_batch = 0
-	brush = target_color(done)
+	brush = _first_unfilled_color()
 	active = true
 	visible = true
 	_layout()
@@ -78,11 +85,26 @@ func close() -> void:
 	station_idx = -1
 
 
-func sync_progress(done_count: int) -> void:
-	if done_count > done:
-		done = done_count
-		mistakes_batch = 0
-		queue_redraw()
+func sync_progress(_done_count: int) -> void:
+	for i in Game.filled_of(station_idx):
+		filled[int(i)] = true
+	done = filled.size()
+	queue_redraw()
+
+
+func _first_unfilled_color() -> int:
+	for i in tokens.size():
+		if not filled.has(i):
+			return target_color(i)
+	return 0
+
+
+func remaining_of_color(c: int) -> int:
+	var n := 0
+	for i in tokens.size():
+		if not filled.has(i) and target_color(i) == c:
+			n += 1
+	return n
 
 
 func cell_of(i: int) -> int:
@@ -143,19 +165,17 @@ func _click(pos: Vector2) -> void:
 	if done >= tokens.size():
 		return
 
-	var target_cell := cell_of(done)
-	if cell_rect(target_cell).has_point(pos):
-		if brush == target_color(done):
-			_advance()
+	# порядок свободный: ищем любую незакрашенную клетку под курсором
+	for i in tokens.size():
+		if filled.has(i):
+			continue
+		if not cell_rect(cell_of(i)).has_point(pos):
+			continue
+		if brush == target_color(i):
+			_advance(i)
 		else:
-			_miss(target_cell)
-		return
-
-	# клик по любой другой клетке спрайта — тоже промах
-	for i in range(done, tokens.size()):
-		if cell_rect(cell_of(i)).has_point(pos):
 			_miss(cell_of(i))
-			return
+		return
 
 
 func _miss(cell: int) -> void:
@@ -166,11 +186,15 @@ func _miss(cell: int) -> void:
 	queue_redraw()
 
 
-func _advance() -> void:
+func _advance(i: int) -> void:
 	var reported := mistakes_batch
-	done += 1
+	filled[i] = true
+	done = filled.size()
 	mistakes_batch = 0
-	Game.request_token(station_idx, reported)
+	Game.request_token(station_idx, reported, i)
+	# кисть кончилась — сразу переключаемся на следующий нужный цвет
+	if remaining_of_color(brush) == 0:
+		brush = _first_unfilled_color()
 	queue_redraw()
 
 
@@ -218,26 +242,24 @@ func _draw() -> void:
 	if _font:
 		draw_string(_font, _origin + Vector2(0, 34), "ТЕРМИНАЛ — ГРАФИКА",
 			HORIZONTAL_ALIGNMENT_CENTER, PANEL_W, 20, Color(0.85, 0.88, 0.95))
-		draw_string(_font, _origin + Vector2(0, 60), "клетка %d из %d" % [mini(done + 1, tokens.size()), tokens.size()],
+		draw_string(_font, _origin + Vector2(0, 60), "закрашено %d из %d" % [done, tokens.size()],
 			HORIZONTAL_ALIGNMENT_CENTER, PANEL_W, 15, Color(0.60, 0.64, 0.72))
 
 	# клетки спрайта
+	var pulse := 0.45 + 0.35 * sin(_pulse)
 	for i in tokens.size():
 		var r := cell_rect(cell_of(i))
 		var col: Color = PALETTE[target_color(i)]
-		if i < done:
+		if filled.has(i):
 			draw_rect(r, col, true)
 		else:
 			draw_rect(r, Color(0.16, 0.17, 0.21), true)
 			draw_rect(r, Color(col.r, col.g, col.b, 0.35), false, 2.0)
 			# точка-подсказка нужного цвета
 			draw_circle(r.get_center(), 9.0, Color(col.r, col.g, col.b, 0.55))
-
-	# текущая клетка
-	if done < tokens.size():
-		var cur := cell_rect(cell_of(done))
-		var a := 0.55 + 0.45 * sin(_pulse)
-		draw_rect(cur.grow(3.0), Color(1, 1, 1, a), false, 3.0)
+			# клетки под текущую кисть подсвечены — крась их подряд
+			if target_color(i) == brush:
+				draw_rect(r.grow(2.0), Color(1, 1, 1, pulse), false, 3.0)
 
 	# клетка, по которой промахнулись: красная заливка и крест
 	if _bad_cell >= 0 and _bad_time > 0.0:
@@ -262,5 +284,5 @@ func _draw() -> void:
 
 	if _font:
 		draw_string(_font, _origin + Vector2(0, PANEL_H - 14.0),
-			"1-4 или клик — выбрать цвет   ·   клик по клетке — залить   ·   Esc — отойти",
+			"1-4 или клик — цвет   ·   крась подсвеченные клетки в любом порядке   ·   Esc — отойти",
 			HORIZONTAL_ALIGNMENT_CENTER, PANEL_W, 14, Color(0.55, 0.59, 0.68))

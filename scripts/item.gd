@@ -57,7 +57,7 @@ func _process(delta: float) -> void:
 	if holder != 0 and Boot.players.has(holder):
 		var p := Boot.players[holder] as Node3D
 		var fwd := -p.global_transform.basis.z
-		target_pos = p.global_position + fwd * 0.7 + Vector3(0, 0.75, 0)
+		target_pos = p.global_position + fwd * 0.8 + Vector3(0, 0.15, 0)
 		rotation.y = p.rotation.y
 	else:
 		_spin += delta * 1.2

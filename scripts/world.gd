@@ -3,6 +3,7 @@ extends Node3D
 
 const StationScript := preload("res://scripts/workstation.gd")
 const AssemblerScript := preload("res://scripts/assembler.gd")
+const QaScript := preload("res://scripts/qa_terminal.gd")
 
 const ROOM := 20.0
 
@@ -15,6 +16,8 @@ const STATIONS := [
 var stations: Array = []
 var assembler: Node3D = null
 var items_root: Node3D = null
+var bugs_root: Node3D = null
+var qa: Node3D = null
 var tray: Node3D = null
 var board: Label3D = null
 
@@ -24,12 +27,17 @@ func _ready() -> void:
 	items_root.name = "Items"
 	add_child(items_root)
 
+	bugs_root = Node3D.new()
+	bugs_root.name = "Bugs"
+	add_child(bugs_root)
+
 	_build_env()
 	_build_light()
 	_build_floor()
 	_build_walls()
 	_build_stations()
 	_build_assembler()
+	_build_qa()
 	_build_tray()
 	_build_board()
 
@@ -63,6 +71,8 @@ func _build_board() -> void:
 	board.text = "ждём контракт..."
 	board.position = Vector3(0, 3.3, -ROOM * 0.5 + 0.5)
 	board.billboard = BaseMaterial3D.BILLBOARD_DISABLED
+	board.double_sided = false
+	board.double_sided = false
 	board.pixel_size = 0.012
 	board.outline_size = 10
 	board.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -74,10 +84,21 @@ func set_board(c: Dictionary) -> void:
 	if board == null or c.is_empty():
 		return
 	var need: Dictionary = c["need"]
-	board.text = "КОНТРАКТ №%d   ·   %s\nнужно:  Код %d   ·   Графика %d   ·   Музыка %d\nсрок: %d недель   ·   гонорар $%d" % [
+	board.text = "КОНТРАКТ №%d   ·   %s\nнужно:  Код %d   ·   Графика %d   ·   Музыка %d\nсрок: %d %s   ·   гонорар $%d" % [
 		int(c.get("index", 1)), String(c["title"]),
 		int(need.get("code", 0)), int(need.get("art", 0)), int(need.get("music", 0)),
-		int(c["weeks"]), int(c["pay"])]
+		int(c["weeks"]), weeks_word(int(c["weeks"])), int(c["pay"])]
+
+
+## «1 неделя», «3 недели», «5 недель» — иначе на доске режет глаз.
+static func weeks_word(n: int) -> String:
+	var n10 := n % 10
+	var n100 := n % 100
+	if n10 == 1 and n100 != 11:
+		return "неделя"
+	if n10 >= 2 and n10 <= 4 and (n100 < 12 or n100 > 14):
+		return "недели"
+	return "недель"
 
 
 func _build_env() -> void:
@@ -164,6 +185,13 @@ func _build_assembler() -> void:
 	add_child(assembler)
 
 
+func _build_qa() -> void:
+	qa = QaScript.new()
+	qa.position = Vector3(4.2, 0, 1.6)
+	qa.rotation_degrees = Vector3(0, 200, 0)
+	add_child(qa)
+
+
 func _build_tray() -> void:
 	# StaticBody3D, а не Node3D — иначе сквозь лоток можно пройти насквозь
 	var body := StaticBody3D.new()
@@ -204,6 +232,8 @@ func _build_tray() -> void:
 	label.position = Vector3(0, 1.75, 0)
 	label.rotation_degrees = Vector3(0, 180, 0)   # лицом в комнату
 	label.billboard = BaseMaterial3D.BILLBOARD_DISABLED
+	label.double_sided = false
+	label.double_sided = false
 	label.pixel_size = 0.0045
 	label.outline_size = 8
 	tray.add_child(label)
