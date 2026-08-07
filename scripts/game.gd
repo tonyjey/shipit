@@ -460,6 +460,8 @@ func _server_interact(pid: int, type: String, id: int) -> void:
 			if it.holder != 0:
 				return
 			_bcast("rpc_item_state", [id, pid, it.global_position])
+			if pid == Boot.local_id():
+				Boot.play_sfx("pickup")
 
 		"station":
 			if id < 0 or id >= Boot.world.stations.size():
@@ -480,8 +482,12 @@ func _server_interact(pid: int, type: String, id: int) -> void:
 		"bug":
 			if not testing or reveal_left <= 0.0 or not bugs.has(id):
 				return
+			# rpc_bug_caught уже увеличил счётчик, поэтому сравниваем как есть.
+			# Раньше здесь было bugs_caught + 1 — игра выходила на одного бага раньше.
 			_bcast("rpc_bug_caught", [id, bugs_caught + 1])
-			if bugs_caught + 1 >= bugs_total:
+			if pid == Boot.local_id():
+				Boot.play_sfx("bug")
+			if bugs_caught >= bugs_total:
 				_server_finish(true)
 			return
 
@@ -501,6 +507,8 @@ func _server_interact(pid: int, type: String, id: int) -> void:
 			var disc := String(held.kind).substr(6)
 			_bcast("rpc_item_remove", [held.item_id])
 			_bcast("rpc_delivered", [delivered + 1, quality_sum + q, disc])
+			if pid == Boot.local_id():
+				Boot.play_sfx("deliver")
 
 
 func _server_drop(pid: int) -> void:
@@ -731,6 +739,14 @@ func rpc_delivered(n: int, q_sum: float, disc: String) -> void:
 
 # ---------------------------------------------------------------- КОНТРАКТ
 
+## Подхватываем сохранённый прогресс студии перед первым контрактом.
+func apply_progress(saved_money: int, saved_difficulty: int) -> void:
+	if not _is_server():
+		return
+	money = saved_money
+	difficulty = saved_difficulty
+
+
 func server_start_contract() -> void:
 	if not _is_server():
 		return
@@ -842,6 +858,10 @@ func rpc_contract_end(score: int, pay: int, completeness: float, quality: float,
 	contract_running = false
 	money += pay
 	difficulty += 1
+	# сохраняем уже после инкремента, иначе «Продолжить» откатывало на контракт назад
+	if Boot.is_host():
+		Boot.save_progress(money, difficulty)
+	Boot.play_sfx("fanfare")
 	Boot.close_panels(-1)
 	if Boot.results:
 		Boot.results.show_result(String(contract["title"]), score, completeness, quality, pay, money, early, bug_left, bug_total)

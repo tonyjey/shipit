@@ -177,6 +177,7 @@ func _type_char(ch: String) -> void:
 	else:
 		mistakes_batch += 1
 		typed = maxi(typed - 1, 0)
+		Boot.play_sfx("error")
 		_flash = 0.45
 	_redraw()
 

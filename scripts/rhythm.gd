@@ -130,6 +130,7 @@ func _press(lane: int) -> void:
 	else:
 		mistakes_batch += 1
 		_miss_flash = 0.35
+		Boot.play_sfx("error")
 	queue_redraw()
 
 
@@ -156,6 +157,7 @@ func _process(delta: float) -> void:
 	if done < tokens.size() and _t > hit_time(done) + HIT_WINDOW:
 		mistakes_batch += 1
 		_miss_flash = 0.35
+		Boot.play_sfx("error")
 		_advance()
 	queue_redraw()
 

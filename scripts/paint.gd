@@ -181,6 +181,7 @@ func _click(pos: Vector2) -> void:
 func _miss(cell: int) -> void:
 	mistakes_batch += 1
 	_miss_flash = 0.45
+	Boot.play_sfx("error")
 	_bad_cell = cell
 	_bad_time = 0.45
 	queue_redraw()

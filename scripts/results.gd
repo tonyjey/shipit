@@ -92,7 +92,7 @@ func show_result(title: String, score: int, completeness: float, quality: float,
 	lines.append("Готовность контента: %d%%" % int(round(completeness * 100.0)))
 	lines.append("Качество исполнения: %d%%" % int(round(quality * 100.0)))
 	if bug_total <= 0:
-		lines.append("Тестирование не проводилось — минус 25 к оценке")
+		lines.append("Багов не найдено — тестирование не потребовалось")
 	elif bug_left == 0:
 		lines.append("Все %d багов пойманы" % bug_total)
 	else:

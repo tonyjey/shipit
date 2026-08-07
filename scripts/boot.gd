@@ -2,7 +2,7 @@ extends Node
 ## Точка входа. Автозагрузка "Boot".
 ## Отвечает за: ввод, меню, сеть, спавн игроков, HUD.
 
-const VERSION := "v0.9"
+const VERSION := "v1.0"
 const PORT := 7777
 const MAX_PLAYERS := 4
 
@@ -10,8 +10,31 @@ const PlayerScript := preload("res://scripts/player.gd")
 const WorldScript := preload("res://scripts/world.gd")
 const TerminalScript := preload("res://scripts/terminal.gd")
 const ResultsScript := preload("res://scripts/results.gd")
+const SettingsScript := preload("res://scripts/settings_panel.gd")
 const RhythmScript := preload("res://scripts/rhythm.gd")
 const PaintScript := preload("res://scripts/paint.gd")
+
+const SAVE_PATH := "user://savegame.json"
+const SETTINGS_PATH := "user://settings.json"
+
+const DEFAULT_BINDS := {
+	"move_forward": KEY_W,
+	"move_back": KEY_S,
+	"move_left": KEY_A,
+	"move_right": KEY_D,
+	"jump": KEY_SPACE,
+	"interact": KEY_E,
+	"drop": KEY_Q,
+}
+
+const SFX := {
+	"click": "res://audio/ui_click.wav",
+	"pickup": "res://audio/pickup.wav",
+	"deliver": "res://audio/deliver.wav",
+	"error": "res://audio/error.wav",
+	"bug": "res://audio/bug.wav",
+	"fanfare": "res://audio/fanfare.wav",
+}
 
 const COLORS := [
 	Color(0.95, 0.36, 0.36),
@@ -30,6 +53,15 @@ var rhythm = null
 var paint = null
 var mouse_wanted := false
 var _crosshair: ColorRect = null
+var settings_panel = null
+var binds: Dictionary = {}
+var volumes: Dictionary = {"master": 0.8, "sfx": 0.8}
+var save_money := 0
+var save_difficulty := 0
+
+var _sfx_players: Array = []
+var _sfx_next := 0
+var _save_label: Label = null
 var results = null
 var _contract_label: Label = null
 
@@ -44,7 +76,10 @@ var _toast_time := 0.0
 
 
 func _ready() -> void:
+	load_settings()
+	load_progress()
 	_setup_input()
+	_setup_audio()
 	multiplayer.peer_connected.connect(_on_peer_connected)
 	multiplayer.peer_disconnected.connect(_on_peer_disconnected)
 	multiplayer.connected_to_server.connect(_on_connected_ok)
@@ -67,16 +102,36 @@ func _process(delta: float) -> void:
 # ---------------------------------------------------------------- ВВОД
 
 func _setup_input() -> void:
-	_bind("move_forward", KEY_W)
-	_bind("move_back", KEY_S)
-	_bind("move_left", KEY_A)
-	_bind("move_right", KEY_D)
-	_bind("jump", KEY_SPACE)
-	_bind("interact", KEY_E)
-	_bind("drop", KEY_Q)
+	for action in DEFAULT_BINDS.keys():
+		_bind(String(action), int(binds.get(action, DEFAULT_BINDS[action])))
 	_bind("free_mouse", KEY_ESCAPE)
 	_bind("toggle_view", KEY_V)
 	_bind("debug_info", KEY_F1)
+
+
+func rebind(action: String, keycode: int) -> void:
+	binds[action] = keycode
+	if InputMap.has_action(action):
+		InputMap.action_erase_events(action)
+	_bind(action, keycode)
+	save_settings()
+
+
+func reset_binds() -> void:
+	binds = DEFAULT_BINDS.duplicate()
+	for action in DEFAULT_BINDS.keys():
+		if InputMap.has_action(String(action)):
+			InputMap.action_erase_events(String(action))
+		_bind(String(action), int(DEFAULT_BINDS[action]))
+	save_settings()
+
+
+func key_name_of(action: String) -> String:
+	var code := int(binds.get(action, DEFAULT_BINDS.get(action, KEY_NONE)))
+	var nm := OS.get_keycode_string(code)
+	if nm == "":
+		nm = "?"
+	return nm
 
 
 func _bind(action: String, key: Key) -> void:
@@ -228,10 +283,45 @@ func _build_ui() -> void:
 	b_solo.pressed.connect(_solo)
 	box.add_child(b_solo)
 
+	box.add_child(HSeparator.new())
+
+	_save_label = Label.new()
+	_save_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_save_label.add_theme_font_size_override("font_size", 14)
+	_save_label.add_theme_color_override("font_color", Color(0.70, 0.74, 0.82))
+	box.add_child(_save_label)
+	_refresh_save_label()
+
+	var b_reset := Button.new()
+	b_reset.text = "Начать заново (сбросить прогресс)"
+	b_reset.pressed.connect(func():
+		play_sfx("click")
+		reset_progress()
+		toast("Прогресс сброшен", 3.0))
+	box.add_child(b_reset)
+
+	var b_settings := Button.new()
+	b_settings.text = "Настройки"
+	b_settings.pressed.connect(func():
+		play_sfx("click")
+		if settings_panel:
+			settings_panel.open_panel())
+	box.add_child(b_settings)
+
+	var b_quit := Button.new()
+	b_quit.text = "Выход"
+	b_quit.pressed.connect(func():
+		play_sfx("click")
+		get_tree().quit())
+	box.add_child(b_quit)
+
 	_status = Label.new()
 	_status.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_status.add_theme_color_override("font_color", Color(1, 0.6, 0.4))
 	box.add_child(_status)
+
+	settings_panel = SettingsScript.new()
+	_hud.add_child(settings_panel)
 
 	# свои адреса, чтобы было что продиктовать напарнику
 	var ip_info := Label.new()
@@ -242,6 +332,54 @@ func _build_ui() -> void:
 	ip_info.add_theme_color_override("font_color", Color(0.60, 0.64, 0.72))
 	ip_info.text = "Твои адреса для друга: %s\nПорт 7777 (UDP)" % ", ".join(local_ips())
 	box.add_child(ip_info)
+
+
+func _setup_audio() -> void:
+	if AudioServer.get_bus_index("SFX") < 0:
+		AudioServer.add_bus(1)
+		AudioServer.set_bus_name(1, "SFX")
+		AudioServer.set_bus_send(1, "Master")
+	for i in 8:
+		var pl := AudioStreamPlayer.new()
+		pl.bus = "SFX"
+		add_child(pl)
+		_sfx_players.append(pl)
+	_apply_volumes()
+
+
+func _apply_volumes() -> void:
+	_apply_bus("Master", float(volumes.get("master", 0.8)))
+	_apply_bus("SFX", float(volumes.get("sfx", 0.8)))
+
+
+func _apply_bus(bus: String, v: float) -> void:
+	var idx := AudioServer.get_bus_index(bus)
+	if idx < 0:
+		return
+	AudioServer.set_bus_mute(idx, v <= 0.001)
+	AudioServer.set_bus_volume_db(idx, linear_to_db(maxf(v, 0.0001)))
+
+
+func volume_of(bus: String) -> float:
+	return float(volumes.get(bus, 0.8))
+
+
+func set_volume(bus: String, v: float) -> void:
+	volumes[bus] = clampf(v, 0.0, 1.0)
+	_apply_volumes()
+
+
+## Короткие звуки: пул проигрывателей, чтобы они не обрывали друг друга.
+func play_sfx(name: String) -> void:
+	if not SFX.has(name) or _sfx_players.is_empty():
+		return
+	var stream = load(String(SFX[name]))
+	if stream == null:
+		return
+	var pl = _sfx_players[_sfx_next % _sfx_players.size()]
+	_sfx_next += 1
+	pl.stream = stream
+	pl.play()
 
 
 func set_prompt(text: String) -> void:
@@ -277,6 +415,7 @@ func _host() -> void:
 	_enter_game()
 	ready_peers = [1]
 	_spawn_player(1, 1)
+	Game.apply_progress(save_money, save_difficulty)
 	toast("Комната создана. Твой адрес: %s   порт %d" % [", ".join(local_ips()), PORT], 8.0)
 	Game.server_start_contract()
 
@@ -300,6 +439,7 @@ func _solo() -> void:
 	_enter_game()
 	ready_peers = [1]
 	_spawn_player(1, 1)
+	Game.apply_progress(save_money, save_difficulty)
 	Game.server_start_contract()
 
 
@@ -422,6 +562,10 @@ func _spawn_player(id: int, slot: int) -> void:
 func _unhandled_input(event: InputEvent) -> void:
 	if event.is_action_pressed("debug_info"):
 		dump_state()
+	if event is InputEventKey:
+		var k := event as InputEventKey
+		if k.pressed and not k.echo and k.physical_keycode == KEY_F10 and in_game:
+			_leave_game()
 
 
 ## Печатает состояние в панель Output. Нужно, чтобы диагностировать
@@ -497,6 +641,87 @@ func set_mouse_captured(v: bool) -> void:
 
 
 ## Локальные IPv4 — их диктуют напарнику при игре по сети.
+func save_settings() -> void:
+	var f := FileAccess.open(SETTINGS_PATH, FileAccess.WRITE)
+	if f == null:
+		return
+	f.store_string(JSON.stringify({"binds": binds, "volumes": volumes}))
+	f.close()
+
+
+func load_settings() -> void:
+	binds = DEFAULT_BINDS.duplicate()
+	if not FileAccess.file_exists(SETTINGS_PATH):
+		return
+	var f := FileAccess.open(SETTINGS_PATH, FileAccess.READ)
+	if f == null:
+		return
+	var data = JSON.parse_string(f.get_as_text())
+	f.close()
+	if typeof(data) != TYPE_DICTIONARY:
+		return
+	for k in DEFAULT_BINDS.keys():
+		var src: Dictionary = data.get("binds", {})
+		if src.has(k):
+			binds[k] = int(src[k])
+	var vol: Dictionary = data.get("volumes", {})
+	for k in ["master", "sfx"]:
+		if vol.has(k):
+			volumes[k] = clampf(float(vol[k]), 0.0, 1.0)
+
+
+## Прогресс студии: деньги и номер контракта. Сохраняется после каждой сдачи.
+func save_progress(money: int, difficulty: int) -> void:
+	save_money = money
+	save_difficulty = difficulty
+	var f := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
+	if f == null:
+		return
+	f.store_string(JSON.stringify({"money": money, "difficulty": difficulty}))
+	f.close()
+	_refresh_save_label()
+
+
+func load_progress() -> void:
+	save_money = 0
+	save_difficulty = 0
+	if not FileAccess.file_exists(SAVE_PATH):
+		return
+	var f := FileAccess.open(SAVE_PATH, FileAccess.READ)
+	if f == null:
+		return
+	var data = JSON.parse_string(f.get_as_text())
+	f.close()
+	if typeof(data) == TYPE_DICTIONARY:
+		save_money = int(data.get("money", 0))
+		save_difficulty = int(data.get("difficulty", 0))
+
+
+func has_save() -> bool:
+	return save_difficulty > 0 or save_money > 0
+
+
+func reset_progress() -> void:
+	save_money = 0
+	save_difficulty = 0
+	if FileAccess.file_exists(SAVE_PATH):
+		DirAccess.remove_absolute(ProjectSettings.globalize_path(SAVE_PATH))
+	var f := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
+	if f != null:
+		f.store_string(JSON.stringify({"money": 0, "difficulty": 0}))
+		f.close()
+	_refresh_save_label()
+
+
+func _refresh_save_label() -> void:
+	if _save_label == null:
+		return
+	if has_save():
+		_save_label.text = "Сохранение: контракт №%d, на счету $%d" % [save_difficulty + 1, save_money]
+	else:
+		_save_label.text = "Сохранения нет — начнём с нуля"
+
+
 func local_ips() -> Array:
 	var out: Array = []
 	for a in IP.get_local_addresses():
