@@ -121,7 +121,7 @@ func target_color(i: int) -> int:
 
 func cell_rect(cell: int) -> Rect2:
 	var col := cell % GRID_W
-	var row := cell / GRID_W
+	var row := floori(float(cell) / float(GRID_W))
 	return Rect2(_grid_origin + Vector2(float(col) * CELL, float(row) * CELL), Vector2(CELL - 4.0, CELL - 4.0))
 
 
@@ -137,7 +137,7 @@ func _input(event: InputEvent) -> void:
 			return
 		get_viewport().set_input_as_handled()
 		if key.physical_keycode == KEY_ESCAPE:
-			Game.request_leave_station(station_idx)
+			Game.request_leave_station(station_idx, mistakes_batch)
 			return
 		var slot := PAL_KEYS.find(key.physical_keycode)
 		if slot >= 0:

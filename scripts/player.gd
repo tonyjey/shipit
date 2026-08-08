@@ -133,8 +133,6 @@ func _unhandled_input(event: InputEvent) -> void:
 		first_person = not first_person
 		_apply_view()
 		Boot.toast("Вид: %s" % ("от первого лица" if first_person else "от третьего лица"), 2.0)
-	if event.is_action_pressed("free_mouse"):
-		Boot.set_mouse_captured(not Boot.mouse_wanted)
 	if not Boot.mouse_wanted:
 		return
 	if event.is_action_pressed("interact"):

@@ -3,7 +3,7 @@ extends Control
 ## якоря на скрытых узлах не пересчитываются.
 
 const PANEL_W := 640.0
-const PANEL_H := 560.0
+const PANEL_H := 600.0
 
 const ACTIONS := [
 	["move_forward", "Вперёд"],
@@ -67,6 +67,7 @@ func _build() -> void:
 
 	box.add_child(_section("Звук"))
 	box.add_child(_slider_row("Общая громкость", "master"))
+	box.add_child(_slider_row("Музыка", "music"))
 	box.add_child(_slider_row("Эффекты", "sfx"))
 
 	box.add_child(_section("Управление"))

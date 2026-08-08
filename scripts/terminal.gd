@@ -150,7 +150,7 @@ func _input(event: InputEvent) -> void:
 	get_viewport().set_input_as_handled()
 
 	if key.physical_keycode == KEY_ESCAPE:
-		Game.request_leave_station(station_idx)
+		Game.request_leave_station(station_idx, mistakes_batch)
 		return
 
 	var ch := OS.get_keycode_string(key.physical_keycode)

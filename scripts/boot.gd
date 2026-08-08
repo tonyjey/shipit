@@ -2,7 +2,7 @@ extends Node
 ## Точка входа. Автозагрузка "Boot".
 ## Отвечает за: ввод, меню, сеть, спавн игроков, HUD.
 
-const VERSION := "v1.0"
+const VERSION := "v1.1"
 const PORT := 7777
 const MAX_PLAYERS := 4
 
@@ -11,6 +11,7 @@ const WorldScript := preload("res://scripts/world.gd")
 const TerminalScript := preload("res://scripts/terminal.gd")
 const ResultsScript := preload("res://scripts/results.gd")
 const SettingsScript := preload("res://scripts/settings_panel.gd")
+const PauseScript := preload("res://scripts/pause_menu.gd")
 const RhythmScript := preload("res://scripts/rhythm.gd")
 const PaintScript := preload("res://scripts/paint.gd")
 
@@ -26,6 +27,8 @@ const DEFAULT_BINDS := {
 	"interact": KEY_E,
 	"drop": KEY_Q,
 }
+
+const MUSIC_PATH := "res://audio/music/theme_loop.ogg"
 
 const SFX := {
 	"click": "res://audio/ui_click.wav",
@@ -54,8 +57,10 @@ var paint = null
 var mouse_wanted := false
 var _crosshair: ColorRect = null
 var settings_panel = null
+var pause_menu = null
+var _music: AudioStreamPlayer = null
 var binds: Dictionary = {}
-var volumes: Dictionary = {"master": 0.8, "sfx": 0.8}
+var volumes: Dictionary = {"master": 0.8, "sfx": 0.8, "music": 0.55}
 var save_money := 0
 var save_difficulty := 0
 
@@ -76,6 +81,7 @@ var _toast_time := 0.0
 
 
 func _ready() -> void:
+	process_mode = Node.PROCESS_MODE_ALWAYS
 	load_settings()
 	load_progress()
 	_setup_input()
@@ -159,6 +165,7 @@ func _build_ui() -> void:
 	_hud = CanvasLayer.new()
 	_hud.name = "HUD"
 	_hud.layer = 100
+	_hud.process_mode = Node.PROCESS_MODE_ALWAYS
 	get_tree().root.add_child(_hud)
 
 	# подсказка взаимодействия — чуть ниже центра
@@ -323,6 +330,9 @@ func _build_ui() -> void:
 	settings_panel = SettingsScript.new()
 	_hud.add_child(settings_panel)
 
+	pause_menu = PauseScript.new()
+	_hud.add_child(pause_menu)
+
 	# свои адреса, чтобы было что продиктовать напарнику
 	var ip_info := Label.new()
 	ip_info.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -339,6 +349,15 @@ func _setup_audio() -> void:
 		AudioServer.add_bus(1)
 		AudioServer.set_bus_name(1, "SFX")
 		AudioServer.set_bus_send(1, "Master")
+	if AudioServer.get_bus_index("Music") < 0:
+		AudioServer.add_bus(2)
+		AudioServer.set_bus_name(2, "Music")
+		AudioServer.set_bus_send(2, "Master")
+
+	_music = AudioStreamPlayer.new()
+	_music.bus = "Music"
+	_music.process_mode = Node.PROCESS_MODE_ALWAYS   # на паузе музыка не обрывается
+	add_child(_music)
 	for i in 8:
 		var pl := AudioStreamPlayer.new()
 		pl.bus = "SFX"
@@ -350,6 +369,7 @@ func _setup_audio() -> void:
 func _apply_volumes() -> void:
 	_apply_bus("Master", float(volumes.get("master", 0.8)))
 	_apply_bus("SFX", float(volumes.get("sfx", 0.8)))
+	_apply_bus("Music", float(volumes.get("music", 0.55)))
 
 
 func _apply_bus(bus: String, v: float) -> void:
@@ -370,16 +390,34 @@ func set_volume(bus: String, v: float) -> void:
 
 
 ## Короткие звуки: пул проигрывателей, чтобы они не обрывали друг друга.
-func play_sfx(name: String) -> void:
-	if not SFX.has(name) or _sfx_players.is_empty():
+func play_sfx(sfx_name: String) -> void:
+	if not SFX.has(sfx_name) or _sfx_players.is_empty():
 		return
-	var stream = load(String(SFX[name]))
+	var stream = load(String(SFX[sfx_name]))
 	if stream == null:
 		return
 	var pl = _sfx_players[_sfx_next % _sfx_players.size()]
 	_sfx_next += 1
 	pl.stream = stream
 	pl.play()
+
+
+## Музыка играет только в офисе — в главном меню тишина.
+func start_music() -> void:
+	if _music == null:
+		return
+	var stream = load(MUSIC_PATH)
+	if stream == null:
+		return
+	if stream is AudioStreamOggVorbis:
+		(stream as AudioStreamOggVorbis).loop = true
+	_music.stream = stream
+	_music.play()
+
+
+func stop_music() -> void:
+	if _music:
+		_music.stop()
 
 
 func set_prompt(text: String) -> void:
@@ -523,13 +561,20 @@ func _enter_game() -> void:
 	world.name = "World"
 	get_tree().current_scene.add_child(world)
 	set_mouse_captured(true)
-	toast("WASD — ходить, E — взаимодействие, Q — бросить", 6.0)
+	start_music()
+	toast("WASD — ходить, E — взаимодействие, Q — бросить.   Esc — пауза", 7.0)
 	if terminal:
 		terminal.close()
 
 
+func leave_to_menu() -> void:
+	_leave_game()
+
+
 func _leave_game() -> void:
 	in_game = false
+	get_tree().paused = false
+	stop_music()
 	multiplayer.multiplayer_peer = null
 	players.clear()
 	slots.clear()
@@ -565,7 +610,16 @@ func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventKey:
 		var k := event as InputEventKey
 		if k.pressed and not k.echo and k.physical_keycode == KEY_F10 and in_game:
-			_leave_game()
+			leave_to_menu()
+	if event.is_action_pressed("free_mouse") and in_game and pause_menu != null:
+		if settings_panel != null and settings_panel.active:
+			settings_panel.close_panel()
+			return
+		if active_panel() != null:
+			return
+		if results != null and results.active:
+			return
+		pause_menu.toggle()
 
 
 ## Печатает состояние в панель Output. Нужно, чтобы диагностировать
@@ -665,7 +719,7 @@ func load_settings() -> void:
 		if src.has(k):
 			binds[k] = int(src[k])
 	var vol: Dictionary = data.get("volumes", {})
-	for k in ["master", "sfx"]:
+	for k in ["master", "sfx", "music"]:
 		if vol.has(k):
 			volumes[k] = clampf(float(vol[k]), 0.0, 1.0)
 

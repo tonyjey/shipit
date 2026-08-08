@@ -414,11 +414,13 @@ func request_token(idx: int, mistakes: int, slot := -1) -> void:
 		rpc_id(1, "_req_token", idx, mistakes, slot)
 
 
-func request_leave_station(idx: int) -> void:
+## mistakes — то, что игрок наошибался с последнего засчитанного элемента.
+## Без этого можно было выйти по Esc и вернуться с чистой совестью.
+func request_leave_station(idx: int, mistakes := 0) -> void:
 	if _is_server():
-		_server_leave(Boot.local_id(), idx)
+		_server_leave(Boot.local_id(), idx, mistakes)
 	else:
-		rpc_id(1, "_req_leave", idx)
+		rpc_id(1, "_req_leave", idx, mistakes)
 
 
 @rpc("any_peer", "reliable")
@@ -440,9 +442,9 @@ func _req_token(idx: int, mistakes: int, slot: int) -> void:
 
 
 @rpc("any_peer", "reliable")
-func _req_leave(idx: int) -> void:
+func _req_leave(idx: int, mistakes: int) -> void:
 	if _is_server():
-		_server_leave(multiplayer.get_remote_sender_id(), idx)
+		_server_leave(multiplayer.get_remote_sender_id(), idx, mistakes)
 
 
 # ---------------------------------------------------------------- ЛОГИКА СЕРВЕРА
@@ -581,11 +583,15 @@ func _server_token(pid: int, idx: int, mistakes: int, slot: int) -> void:
 	server_spawn_item("asset_" + disc, st.output_position(), quality)
 
 
-func _server_leave(pid: int, idx: int) -> void:
+func _server_leave(pid: int, idx: int, mistakes := 0) -> void:
 	if not _is_server() or not work.has(idx):
 		return
-	if int(work[idx]["occupant"]) != pid:
+	var w: Dictionary = work[idx]
+	if int(w["occupant"]) != pid:
 		return
+	if mistakes > 0:
+		w["mistakes"] = int(w["mistakes"]) + mistakes
+		_bcast("rpc_work_progress", [idx, int(w["done"]), int(w["mistakes"]), w["filled"]])
 	_bcast("rpc_work_occupant", [idx, 0])
 
 
