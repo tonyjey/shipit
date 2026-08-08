@@ -2,7 +2,7 @@ extends Node
 ## Точка входа. Автозагрузка "Boot".
 ## Отвечает за: ввод, меню, сеть, спавн игроков, HUD.
 
-const VERSION := "v1.4"
+const VERSION := "v1.5"
 const PORT := 7777
 const MAX_PLAYERS := 4
 
@@ -12,6 +12,7 @@ const TerminalScript := preload("res://scripts/terminal.gd")
 const ResultsScript := preload("res://scripts/results.gd")
 const SettingsScript := preload("res://scripts/settings_panel.gd")
 const PauseScript := preload("res://scripts/pause_menu.gd")
+const NamingScript := preload("res://scripts/naming.gd")
 const RhythmScript := preload("res://scripts/rhythm.gd")
 const PaintScript := preload("res://scripts/paint.gd")
 
@@ -58,6 +59,8 @@ var mouse_wanted := false
 var _crosshair: ColorRect = null
 var settings_panel = null
 var pause_menu = null
+var naming_panel = null
+var save_history: Array = []
 var _music: AudioStreamPlayer = null
 var binds: Dictionary = {}
 var volumes: Dictionary = {"master": 1.0, "sfx": 1.0, "music": 1.0}
@@ -330,6 +333,9 @@ func _build_ui() -> void:
 	settings_panel = SettingsScript.new()
 	_hud.add_child(settings_panel)
 
+	naming_panel = NamingScript.new()
+	_hud.add_child(naming_panel)
+
 	pause_menu = PauseScript.new()
 	_hud.add_child(pause_menu)
 
@@ -453,7 +459,7 @@ func _host() -> void:
 	_enter_game()
 	ready_peers = [1]
 	_spawn_player(1, 1)
-	Game.apply_progress(save_money, save_difficulty)
+	Game.apply_progress(save_money, save_difficulty, save_history)
 	toast("Комната создана. Твой адрес: %s   порт %d" % [", ".join(local_ips()), PORT], 8.0)
 	Game.server_start_contract()
 
@@ -477,7 +483,7 @@ func _solo() -> void:
 	_enter_game()
 	ready_peers = [1]
 	_spawn_player(1, 1)
-	Game.apply_progress(save_money, save_difficulty)
+	Game.apply_progress(save_money, save_difficulty, save_history)
 
 
 func _on_connected_ok() -> void:
@@ -724,13 +730,14 @@ func load_settings() -> void:
 
 
 ## Прогресс студии: деньги и номер контракта. Сохраняется после каждой сдачи.
-func save_progress(money: int, difficulty: int) -> void:
+func save_progress(money: int, difficulty: int, history: Array = []) -> void:
 	save_money = money
 	save_difficulty = difficulty
+	save_history = history.duplicate()
 	var f := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
 	if f == null:
 		return
-	f.store_string(JSON.stringify({"money": money, "difficulty": difficulty}))
+	f.store_string(JSON.stringify({"money": money, "difficulty": difficulty, "history": save_history}))
 	f.close()
 	_refresh_save_label()
 
@@ -748,6 +755,7 @@ func load_progress() -> void:
 	if typeof(data) == TYPE_DICTIONARY:
 		save_money = int(data.get("money", 0))
 		save_difficulty = int(data.get("difficulty", 0))
+		save_history = data.get("history", [])
 
 
 func has_save() -> bool:
@@ -757,11 +765,12 @@ func has_save() -> bool:
 func reset_progress() -> void:
 	save_money = 0
 	save_difficulty = 0
+	save_history = []
 	if FileAccess.file_exists(SAVE_PATH):
 		DirAccess.remove_absolute(ProjectSettings.globalize_path(SAVE_PATH))
 	var f := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
 	if f != null:
-		f.store_string(JSON.stringify({"money": 0, "difficulty": 0}))
+		f.store_string(JSON.stringify({"money": 0, "difficulty": 0, "history": []}))
 		f.close()
 	_refresh_save_label()
 
@@ -770,7 +779,11 @@ func _refresh_save_label() -> void:
 	if _save_label == null:
 		return
 	if has_save():
-		_save_label.text = "Сохранение: контракт №%d, на счету $%d" % [save_difficulty + 1, save_money]
+		var last := ""
+		if save_history.size() > 0:
+			var h: Dictionary = save_history[save_history.size() - 1]
+			last = "\nпоследняя игра: «%s» — %d/100" % [String(h.get("title", "?")), int(h.get("score", 0))]
+		_save_label.text = "Сохранение: контракт №%d, на счету $%d%s" % [save_difficulty + 1, save_money, last]
 	else:
 		_save_label.text = "Сохранения нет — начнём с нуля"
 

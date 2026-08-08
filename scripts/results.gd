@@ -3,15 +3,17 @@ extends Control
 ## узлах не пересчитываются, на этом уже обожглись.
 
 const PANEL_W := 720.0
-const PANEL_H := 420.0
+const PANEL_H := 520.0
 
 var active := false
 
 var _panel: PanelContainer
+var _game: Label
 var _title: Label
 var _score: Label
 var _verdict: Label
 var _body: Label
+var _shelf: Label
 var _hint: Label
 
 
@@ -52,7 +54,10 @@ func _build() -> void:
 	box.add_theme_constant_override("separation", 8)
 	_panel.add_child(box)
 
-	_title = _mk(22, Color(0.85, 0.88, 0.95))
+	_game = _mk(34, Color(1.0, 1.0, 1.0))
+	box.add_child(_game)
+
+	_title = _mk(15, Color(0.62, 0.66, 0.74))
 	box.add_child(_title)
 
 	_score = _mk(72, Color(0.97, 0.85, 0.45))
@@ -68,6 +73,9 @@ func _build() -> void:
 	_body = _mk(18, Color(0.72, 0.76, 0.85))
 	box.add_child(_body)
 
+	_shelf = _mk(15, Color(0.58, 0.62, 0.70))
+	box.add_child(_shelf)
+
 	_hint = _mk(16, Color(0.60, 0.64, 0.72))
 	box.add_child(_hint)
 
@@ -80,11 +88,12 @@ func _mk(font_size: int, col: Color) -> Label:
 	return l
 
 
-func show_result(title: String, score: int, completeness: float, quality: float, pay: int, money: int, early: bool, bug_left := 0, bug_total := 0) -> void:
+func show_result(game_title: String, contract_title: String, score: int, completeness: float, quality: float, pay: int, money: int, early: bool, bug_left := 0, bug_total := 0, history: Array = []) -> void:
 	active = true
 	visible = true
 	_layout()
-	_title.text = title
+	_game.text = "«%s»" % game_title
+	_title.text = "заказ: %s" % contract_title
 	_score.text = "%d / 100" % score
 	_verdict.text = verdict_for(score)
 
@@ -104,6 +113,16 @@ func show_result(title: String, score: int, completeness: float, quality: float,
 	lines.append("")
 	lines.append("Гонорар: $%d     На счету: $%d" % [pay, money])
 	_body.text = "\n".join(lines)
+
+	# полка студии: что выпускали раньше
+	var shelf: PackedStringArray = []
+	for i in range(maxi(history.size() - 4, 0), maxi(history.size() - 1, 0)):
+		var h: Dictionary = history[i]
+		shelf.append("«%s» — %d" % [String(h.get("title", "?")), int(h.get("score", 0))])
+	if shelf.is_empty():
+		_shelf.text = "Первая игра студии"
+	else:
+		_shelf.text = "Раньше вы выпустили:   " + "   ·   ".join(shelf)
 
 	_hint.text = "[Enter] — закрыть.   Новый контракт берут на доске у дальней стены"
 

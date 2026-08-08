@@ -18,6 +18,9 @@ const BUG_SPEED_REVEALED := 0.9   # подсвеченный «прижат» с
 const BUG_PENALTY := 0.25         # максимальный вычет из оценки за багов
 const MISTAKES_PER_BUG := 2.0     # сколько опечаток порождает одного бага
 const MAX_BUGS := 12
+const NAMING_SECONDS := 40.0
+const VOTING_SECONDS := 25.0
+const FALLBACK_NAMES := ["Безымянный проект", "Проект без названия", "Рабочее название"]
 
 ## Спрайты для стола «Графика»: сетка 4 в ширину, цифра — индекс цвета палитры.
 const SPRITES := [
@@ -56,6 +59,17 @@ var bugs_total := 0
 var bugs_caught := 0
 var round_mistakes := 0
 var _last_sprite := -1
+
+# фаза «как назовём игру»
+var naming := false
+var voting := false
+var name_options: Array = []      # предложенные названия
+var name_owners: Array = []       # чьё какое, чтобы нельзя было голосовать за своё
+var phase_left := 0.0
+var history: Array = []           # выпущенные игры: {"title", "score"}
+var _pending: Dictionary = {}
+var _names: Dictionary = {}
+var _votes: Dictionary = {}
 var reveal_left := 0.0
 var reveal_cooldown := 0.0
 
@@ -121,8 +135,18 @@ func _process(delta: float) -> void:
 	if testing:
 		testing_left = maxf(testing_left - delta, 0.0)
 		Boot.update_contract_hud()
+	if naming or voting:
+		phase_left = maxf(phase_left - delta, 0.0)
 	if not _is_server():
 		return
+	if naming and phase_left <= 0.0:
+		_server_close_naming()
+		return
+	if voting and phase_left <= 0.0:
+		_server_close_voting()
+		return
+	if naming or voting:
+		return                      # пока называют игру, мир ждёт
 	if testing:
 		_tick_testing(delta)
 	_tick_tray(delta)
@@ -591,6 +615,145 @@ func _server_token(pid: int, idx: int, mistakes: int, slot: int) -> void:
 	server_spawn_item("asset_" + disc, st.output_position(), quality)
 
 
+# ---------------------------------------------------------------- НАЗВАНИЕ ИГРЫ
+
+func name_owner(idx: int) -> int:
+	if idx < 0 or idx >= name_owners.size():
+		return 0
+	return int(name_owners[idx])
+
+
+func request_name(text: String) -> void:
+	if _is_server():
+		_server_name(Boot.local_id(), text)
+	else:
+		rpc_id(1, "_req_name", text)
+
+
+func request_vote(idx: int) -> void:
+	if _is_server():
+		_server_vote(Boot.local_id(), idx)
+	else:
+		rpc_id(1, "_req_vote", idx)
+
+
+@rpc("any_peer", "reliable")
+func _req_name(text: String) -> void:
+	if _is_server():
+		_server_name(multiplayer.get_remote_sender_id(), text)
+
+
+@rpc("any_peer", "reliable")
+func _req_vote(idx: int) -> void:
+	if _is_server():
+		_server_vote(multiplayer.get_remote_sender_id(), idx)
+
+
+func _server_name(pid: int, text: String) -> void:
+	if not _is_server() or not naming or _names.has(pid):
+		return
+	var clean := text.strip_edges().substr(0, 26)
+	if clean.is_empty():
+		return
+	_names[pid] = clean
+	_bcast("rpc_phase_progress", [_names.size(), maxi(Boot.players.size(), 1)])
+	if _names.size() >= maxi(Boot.players.size(), 1):
+		_server_close_naming()
+
+
+func _server_vote(pid: int, idx: int) -> void:
+	if not _is_server() or not voting or _votes.has(pid):
+		return
+	if idx < 0 or idx >= name_options.size():
+		return
+	if int(name_owners[idx]) == pid:
+		return
+	_votes[pid] = idx
+	_bcast("rpc_phase_progress", [_votes.size(), maxi(Boot.players.size(), 1)])
+	if _votes.size() >= maxi(Boot.players.size(), 1):
+		_server_close_voting()
+
+
+func _server_close_naming() -> void:
+	if not _is_server() or not naming:
+		return
+	# кто не успел — за того придумывает издатель
+	for pid in Boot.players.keys():
+		if not _names.has(pid):
+			_names[pid] = String(FALLBACK_NAMES[randi() % FALLBACK_NAMES.size()])
+
+	var opts: Array = []
+	var owners: Array = []
+	for pid in _names.keys():
+		var t: String = String(_names[pid])
+		if opts.has(t):
+			continue
+		opts.append(t)
+		owners.append(int(pid))
+
+	if opts.size() <= 1:
+		_server_apply_title(String(opts[0]) if opts.size() == 1 else "Безымянный проект")
+		return
+	_bcast("rpc_voting_start", [opts, owners, VOTING_SECONDS])
+
+
+func _server_close_voting() -> void:
+	if not _is_server() or not voting:
+		return
+	var tally: Array = []
+	for i in name_options.size():
+		tally.append(0)
+	for pid in _votes.keys():
+		var i := int(_votes[pid])
+		tally[i] = int(tally[i]) + 1
+
+	var best := 0
+	for i in tally.size():
+		if int(tally[i]) > int(tally[best]):
+			best = i
+	# при равенстве голосов выбираем случайное из лидеров
+	var leaders: Array = []
+	for i in tally.size():
+		if int(tally[i]) == int(tally[best]):
+			leaders.append(i)
+	best = int(leaders[randi() % leaders.size()])
+	_server_apply_title(String(name_options[best]))
+
+
+func _server_apply_title(title: String) -> void:
+	var p := _pending
+	_bcast("rpc_contract_end", [title, int(p["score"]), int(p["pay"]), float(p["completeness"]),
+		float(p["quality"]), bool(p["early"]), int(p["bug_left"]), int(p["bug_total"])])
+
+
+@rpc("authority", "call_local", "reliable")
+func rpc_naming_start(seconds: float, contract_title: String) -> void:
+	naming = true
+	voting = false
+	phase_left = seconds
+	name_options = []
+	name_owners = []
+	if Boot.naming_panel:
+		Boot.naming_panel.open_naming(seconds, contract_title)
+
+
+@rpc("authority", "call_local", "reliable")
+func rpc_voting_start(opts: Array, owners: Array, seconds: float) -> void:
+	naming = false
+	voting = true
+	phase_left = seconds
+	name_options = opts.duplicate()
+	name_owners = owners.duplicate()
+	if Boot.naming_panel:
+		Boot.naming_panel.open_voting(name_options, seconds)
+
+
+@rpc("authority", "call_local", "reliable")
+func rpc_phase_progress(done_count: int, total_count: int) -> void:
+	if Boot.naming_panel:
+		Boot.naming_panel.set_progress(done_count, total_count)
+
+
 func _server_leave(pid: int, idx: int, mistakes := 0) -> void:
 	if not _is_server() or not work.has(idx):
 		return
@@ -775,11 +938,12 @@ func rpc_delivered(n: int, q_sum: float, disc: String) -> void:
 # ---------------------------------------------------------------- КОНТРАКТ
 
 ## Подхватываем сохранённый прогресс студии перед первым контрактом.
-func apply_progress(saved_money: int, saved_difficulty: int) -> void:
+func apply_progress(saved_money: int, saved_difficulty: int, saved_history: Array = []) -> void:
 	if not _is_server():
 		return
 	money = saved_money
 	difficulty = saved_difficulty
+	history = saved_history.duplicate()
 
 
 func server_start_contract() -> void:
@@ -860,7 +1024,14 @@ func _server_finish(early: bool) -> void:
 	var score := int(round(100.0 * clampf(
 		0.60 * completeness + 0.32 * q + bonus - BUG_PENALTY * bug_ratio, 0.0, 1.0)))
 	var pay := int(round(float(contract["pay"]) * float(score) / 100.0))
-	_bcast("rpc_contract_end", [score, pay, completeness, q, early, bugs_left(), bugs_total])
+	# Оценку пока не показываем: сначала команда даёт игре имя.
+	_pending = {
+		"score": score, "pay": pay, "completeness": completeness,
+		"quality": q, "early": early, "bug_left": bugs_left(), "bug_total": bugs_total,
+	}
+	_names = {}
+	_votes = {}
+	_bcast("rpc_naming_start", [NAMING_SECONDS, String(contract["title"])])
 
 
 @rpc("authority", "call_local", "reliable")
@@ -889,19 +1060,24 @@ func rpc_contract_time(t: float) -> void:
 
 
 @rpc("authority", "call_local", "reliable")
-func rpc_contract_end(score: int, pay: int, completeness: float, quality: float, early: bool, bug_left: int, bug_total: int) -> void:
+func rpc_contract_end(title: String, score: int, pay: int, completeness: float, quality: float, early: bool, bug_left: int, bug_total: int) -> void:
+	naming = false
+	voting = false
+	if Boot.naming_panel:
+		Boot.naming_panel.close()
+	history.append({"title": title, "score": score})
 	contract_running = false
 	money += pay
 	difficulty += 1
 	# сохраняем уже после инкремента, иначе «Продолжить» откатывало на контракт назад
 	if Boot.is_host():
-		Boot.save_progress(money, difficulty)
+		Boot.save_progress(money, difficulty, history)
 	Boot.play_sfx("fanfare")
 	Boot.close_panels(-1)
 	if Boot.world:
 		Boot.world.clear_board()
 	if Boot.results:
-		Boot.results.show_result(String(contract["title"]), score, completeness, quality, pay, money, early, bug_left, bug_total)
+		Boot.results.show_result(title, String(contract["title"]), score, completeness, quality, pay, money, early, bug_left, bug_total, history)
 	_clear_bugs()
 	Boot.update_contract_hud()
 
@@ -966,6 +1142,8 @@ func held_item_of(pid: int):
 
 
 func is_local_busy() -> bool:
+	if Boot.naming_panel != null and Boot.naming_panel.active:
+		return true
 	if Boot.active_panel() != null:
 		return true
 	if Boot.results != null and Boot.results.active:
