@@ -1,16 +1,17 @@
 extends Control
 ## Ритм-игра для стола «Музыка».
 ##
-## Архитектурно это та же «работа над задачей», что и терминал: каждая нота —
-## один «токен» из общего списка work.tokens, только вместо слова в нём номер
-## дорожки. Поэтому вся серверная логика (прогресс, пауза, качество) переиспользуется.
+## Токен задачи — это нота: "2" (тап по дорожке 2) или "2:0.9"
+## (зажать дорожку 2 и держать 0.9 секунды). Вся серверная логика —
+## прогресс, пауза, качество — общая с остальными мини-играми.
 
 const PANEL_W := 560.0
 const PANEL_H := 470.0
 const LANES := 4
-const NOTE_INTERVAL := 0.80    # секунд между нотами
+const NOTE_INTERVAL := 0.80    # секунд между обычными нотами
+const HOLD_GAP := 0.55         # пауза после длинной ноты
 const APPROACH := 1.7          # сколько нота летит до линии
-const LEAD_IN := 2.2           # разгон: пауза перед первой нотой
+const LEAD_IN := 2.2           # разгон перед первой нотой
 const HIT_WINDOW := 0.24       # допуск попадания в обе стороны
 
 const LANE_KEYS := [KEY_D, KEY_F, KEY_J, KEY_K]
@@ -30,6 +31,9 @@ var mistakes_batch := 0
 
 var _base := 0
 var _t := 0.0
+var _times: Array = []
+var _holding := false
+var _hold_lane := -1
 var _origin := Vector2.ZERO
 var _lane_flash := [0.0, 0.0, 0.0, 0.0]
 var _miss_flash := 0.0
@@ -61,7 +65,10 @@ func open(idx: int, _disc: String, toks: Array, done_count: int) -> void:
 	done = done_count
 	_base = done_count
 	_t = 0.0
+	_holding = false
+	_hold_lane = -1
 	mistakes_batch = 0
+	_recompute_times()
 	active = true
 	visible = true
 	_layout()
@@ -72,6 +79,8 @@ func close() -> void:
 	active = false
 	visible = false
 	station_idx = -1
+	_holding = false
+	_hold_lane = -1
 
 
 func sync_progress(done_count: int) -> void:
@@ -80,19 +89,53 @@ func sync_progress(done_count: int) -> void:
 		mistakes_batch = 0
 
 
+## Длинные ноты занимают больше времени, поэтому расписание считаем
+## накопительно, а не по формуле «номер × интервал».
+func _recompute_times() -> void:
+	_times.clear()
+	var t := LEAD_IN + APPROACH
+	for i in tokens.size():
+		if i < _base:
+			_times.append(0.0)
+			continue
+		_times.append(t)
+		var hl := hold_len(i)
+		if hl > 0.0:
+			t += hl + HOLD_GAP
+		else:
+			t += NOTE_INTERVAL
+
+
 func hit_time(i: int) -> float:
-	return LEAD_IN + APPROACH + float(i - _base) * NOTE_INTERVAL
+	if i < 0 or i >= _times.size():
+		return 0.0
+	return float(_times[i])
 
 
-## Сколько секунд осталось до старта. Больше нуля — идёт обратный отсчёт.
 func countdown() -> float:
 	return maxf(LEAD_IN - _t, 0.0)
 
 
-func lane_of(i: int) -> int:
+func _parts(i: int) -> PackedStringArray:
 	if i < 0 or i >= tokens.size():
-		return 0
-	return clampi(int(String(tokens[i])), 0, LANES - 1)
+		return PackedStringArray(["0"])
+	return String(tokens[i]).split(":")
+
+
+func lane_of(i: int) -> int:
+	return clampi(int(_parts(i)[0]), 0, LANES - 1)
+
+
+## Сколько секунд ноту нужно держать. Ноль — обычный тап.
+func hold_len(i: int) -> float:
+	var p := _parts(i)
+	if p.size() < 2:
+		return 0.0
+	return maxf(float(p[1]), 0.0)
+
+
+func is_holding() -> bool:
+	return _holding
 
 
 # ---------------------------------------------------------------- ВВОД
@@ -106,15 +149,21 @@ func _input(event: InputEvent) -> void:
 	if not (event is InputEventKey):
 		return
 	var key := event as InputEventKey
-	if not key.pressed or key.echo:
-		return
-	get_viewport().set_input_as_handled()
-
-	if key.physical_keycode == KEY_ESCAPE:
-		Game.request_leave_station(station_idx, mistakes_batch)
+	if key.echo:
 		return
 
 	var lane := LANE_KEYS.find(key.physical_keycode)
+
+	if not key.pressed:
+		if lane >= 0:
+			get_viewport().set_input_as_handled()
+			_release(lane)
+		return
+
+	get_viewport().set_input_as_handled()
+	if key.physical_keycode == KEY_ESCAPE:
+		Game.request_leave_station(station_idx, mistakes_batch)
+		return
 	if lane < 0:
 		return
 	_press(lane)
@@ -122,16 +171,36 @@ func _input(event: InputEvent) -> void:
 
 func _press(lane: int) -> void:
 	_lane_flash[lane] = 0.18
-	if done >= tokens.size():
+	if done >= tokens.size() or _holding:
 		return
 	var dt := _t - hit_time(done)
 	if absf(dt) <= HIT_WINDOW and lane == lane_of(done):
-		_advance()
+		if hold_len(done) > 0.0:
+			_holding = true          # длинную ноту нужно додержать
+			_hold_lane = lane
+		else:
+			_advance()
 	else:
-		mistakes_batch += 1
-		_miss_flash = 0.35
-		Boot.play_sfx("error")
+		_miss()
 	queue_redraw()
+
+
+func _release(lane: int) -> void:
+	if not _holding or lane != _hold_lane:
+		return
+	var end_t := hit_time(done) + hold_len(done)
+	_holding = false
+	_hold_lane = -1
+	if _t < end_t - HIT_WINDOW:
+		_miss()                      # отпустил раньше времени
+	_advance()
+	queue_redraw()
+
+
+func _miss() -> void:
+	mistakes_batch += 1
+	_miss_flash = 0.35
+	Boot.play_sfx("error")
 
 
 func _advance() -> void:
@@ -153,12 +222,16 @@ func _process(delta: float) -> void:
 	if _miss_flash > 0.0:
 		_miss_flash -= delta
 
-	# нота, которую прозевали: считаем промах, но песня идёт дальше
-	if done < tokens.size() and _t > hit_time(done) + HIT_WINDOW:
-		mistakes_batch += 1
-		_miss_flash = 0.35
-		Boot.play_sfx("error")
-		_advance()
+	if done < tokens.size():
+		var start := hit_time(done)
+		if _holding:
+			if _t >= start + hold_len(done):
+				_holding = false
+				_hold_lane = -1
+				_advance()           # додержал до конца
+		elif _t > start + HIT_WINDOW:
+			_miss()                  # прозевали ноту: песня идёт дальше
+			_advance()
 	queue_redraw()
 
 
@@ -180,8 +253,6 @@ func _draw() -> void:
 			HORIZONTAL_ALIGNMENT_CENTER, PANEL_W, 20, Color(0.85, 0.88, 0.95))
 		draw_string(_font, _origin + Vector2(0, 58), "нота %d из %d" % [mini(done + 1, tokens.size()), tokens.size()],
 			HORIZONTAL_ALIGNMENT_CENTER, PANEL_W, 15, Color(0.60, 0.64, 0.72))
-
-	if _font:
 		var m := Game.mistakes_of(station_idx) + mistakes_batch
 		var q := int(round(Game.quality_for(m) * 100.0))
 		var scol := Color(0.55, 0.85, 0.60)
@@ -196,39 +267,51 @@ func _draw() -> void:
 	var line_y := _origin.y + PANEL_H - 74.0
 	var pps := (line_y - top) / APPROACH
 
-	# дорожки
 	for i in LANES:
 		var x := _origin.x + pad + float(i) * lane_w
 		var col: Color = LANE_COLORS[i]
 		draw_rect(Rect2(x + 3.0, top, lane_w - 6.0, line_y - top), Color(col.r, col.g, col.b, 0.07), true)
-		var pad_col := Color(col.r, col.g, col.b, 0.35 + 0.55 * clampf(_lane_flash[i] / 0.18, 0.0, 1.0))
-		draw_rect(Rect2(x + 3.0, line_y, lane_w - 6.0, 26.0), pad_col, true)
+		var glow := 0.35 + 0.55 * clampf(_lane_flash[i] / 0.18, 0.0, 1.0)
+		if _holding and _hold_lane == i:
+			glow = 1.0
+		draw_rect(Rect2(x + 3.0, line_y, lane_w - 6.0, 26.0), Color(col.r, col.g, col.b, glow), true)
 		if _font:
 			draw_string(_font, Vector2(x, line_y + 50.0), String(LANE_NAMES[i]),
 				HORIZONTAL_ALIGNMENT_CENTER, lane_w, 20, Color(0.80, 0.83, 0.90))
 
-	# линия попадания
 	draw_line(Vector2(_origin.x + pad, line_y), Vector2(_origin.x + PANEL_W - pad, line_y),
 		Color(1, 1, 1, 0.55), 2.0)
 
-	# обратный отсчёт перед первой нотой
 	var cd := countdown()
 	if cd > 0.0 and _font:
-		var n := int(ceil(cd))
-		draw_string(_font, Vector2(_origin.x, top + (line_y - top) * 0.45), str(n),
+		draw_string(_font, Vector2(_origin.x, top + (line_y - top) * 0.45), str(int(ceil(cd))),
 			HORIZONTAL_ALIGNMENT_CENTER, PANEL_W, 64, Color(1.0, 1.0, 1.0, 0.85))
 		draw_string(_font, Vector2(_origin.x, top + (line_y - top) * 0.45 + 34.0), "приготовься",
 			HORIZONTAL_ALIGNMENT_CENTER, PANEL_W, 16, Color(0.70, 0.74, 0.82))
 
-	# летящие ноты
 	for i in range(done, mini(done + 4, tokens.size())):
 		var t_hit := hit_time(i)
+		var hl := hold_len(i)
 		var y := line_y - (t_hit - _t) * pps
-		if y < top - 20.0 or y > line_y + 30.0:
+		var y_tail := line_y - (t_hit + hl - _t) * pps
+		if y < top - 40.0 or y_tail > line_y + 30.0:
 			continue
 		var lane := lane_of(i)
 		var x := _origin.x + pad + float(lane) * lane_w
 		var col: Color = LANE_COLORS[lane]
 		if i == done and absf(_t - t_hit) <= HIT_WINDOW:
 			col = Color(1, 1, 1)
+		if hl > 0.0:
+			# длинная нота: хвост от головы вверх
+			var top_y := maxf(y_tail, top - 10.0)
+			var body := Rect2(x + 16.0, top_y, lane_w - 32.0, maxf(y - top_y, 4.0))
+			var body_col := Color(col.r, col.g, col.b, 0.55)
+			if _holding and i == done:
+				body_col = Color(1, 1, 1, 0.75)
+			draw_rect(body, body_col, true)
 		draw_rect(Rect2(x + 8.0, y - 11.0, lane_w - 16.0, 22.0), col, true)
+
+	if _font:
+		draw_string(_font, _origin + Vector2(0, PANEL_H - 12.0),
+			"D F J K — лови ноты   ·   длинную ноту нужно зажать и держать   ·   Esc — отойти",
+			HORIZONTAL_ALIGNMENT_CENTER, PANEL_W, 14, Color(0.55, 0.59, 0.68))

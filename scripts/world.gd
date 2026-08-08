@@ -90,6 +90,12 @@ func _build_board() -> void:
 	add_child(board)
 
 
+## Возврат доски в состояние «заказа нет».
+func clear_board() -> void:
+	if board:
+		board.text = "ДОСКА КОНТРАКТОВ\nподойди и нажми E, чтобы взять заказ"
+
+
 ## Доска задач над лотком: что именно просит издатель.
 func set_board(c: Dictionary) -> void:
 	if board == null or c.is_empty():

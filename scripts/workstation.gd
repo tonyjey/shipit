@@ -20,6 +20,7 @@ var color := Color.WHITE
 var _total := 0
 var _done := 0
 var _bar: Node3D
+var _bar_frame: MeshInstance3D
 var _screen_mat: StandardMaterial3D
 var _power_mat: StandardMaterial3D
 
@@ -75,12 +76,14 @@ func _build() -> void:
 	frame_mat.albedo_color = Color(0.02, 0.02, 0.02)
 	frame_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 
-	var frame := MeshInstance3D.new()
+	_bar_frame = MeshInstance3D.new()
+	var frame := _bar_frame
 	var fm := BoxMesh.new()
 	fm.size = Vector3(BAR_W + BAR_EDGE * 2.0, BAR_H + BAR_EDGE * 2.0, BAR_D)
 	frame.mesh = fm
 	frame.material_override = frame_mat
 	frame.position = Vector3(0, BAR_Y, BAR_Z - 0.004)
+	frame.visible = false
 	add_child(frame)
 
 	var bar_mat := StandardMaterial3D.new()
@@ -164,6 +167,7 @@ func set_work(total: int, done: int) -> void:
 	_total = maxi(total, 1)
 	_done = done
 	_bar.visible = true
+	_bar_frame.visible = true
 	_bar.scale.x = maxf(float(_done) / float(_total), 0.02)
 	_screen_mat.emission_energy_multiplier = 1.6
 	if _power_mat:
@@ -174,6 +178,7 @@ func clear_work() -> void:
 	_total = 0
 	_done = 0
 	_bar.visible = false
+	_bar_frame.visible = false
 	_screen_mat.emission_energy_multiplier = 0.6
 	if _power_mat:
 		_power_mat.emission_energy_multiplier = 0.0

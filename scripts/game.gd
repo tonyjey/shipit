@@ -55,6 +55,7 @@ var bugs: Dictionary = {}
 var bugs_total := 0
 var bugs_caught := 0
 var round_mistakes := 0
+var _last_sprite := -1
 var reveal_left := 0.0
 var reveal_cooldown := 0.0
 
@@ -606,18 +607,33 @@ func _make_tokens(disc: String) -> Array:
 	var out: Array = []
 	# музыка играется как ритм-игра: токен = номер дорожки
 	if disc == "music":
+		# примерно каждая четвёртая нота — длинная: её нужно зажать и держать
 		var last := -1
+		var holds := 0
 		for i in NOTES_PER_TASK:
 			var lane := randi() % 4
 			if lane == last and randf() < 0.6:
 				lane = (lane + 1 + randi() % 3) % 4
 			last = lane
-			out.append(str(lane))
+			var make_hold := holds < 2 and i > 0 and randf() < 0.3
+			if make_hold:
+				holds += 1
+				out.append("%d:%.2f" % [lane, 0.7 + randf() * 0.5])
+			else:
+				out.append(str(lane))
 		return out
 	# графика — раскраска: токен это «клетка:цвет», идём цветами подряд,
 	# чтобы кисть приходилось менять три-четыре раза, а не на каждой клетке
 	if disc == "art":
-		var tpl: Array = SPRITES[randi() % SPRITES.size()]
+		# не повторяем предыдущий рисунок и каждый раз тасуем палитру:
+		# один и тот же спрайт подряд читался как поломка
+		var pick := randi() % SPRITES.size()
+		if SPRITES.size() > 1 and pick == _last_sprite:
+			pick = (pick + 1 + randi() % (SPRITES.size() - 1)) % SPRITES.size()
+		_last_sprite = pick
+		var tpl: Array = SPRITES[pick]
+		var remap := [0, 1, 2, 3]
+		remap.shuffle()
 		var by_color: Dictionary = {}
 		for r in tpl.size():
 			var row: String = tpl[r]
@@ -625,7 +641,7 @@ func _make_tokens(disc: String) -> Array:
 				var ch := row.substr(c, 1)
 				if ch == ".":
 					continue
-				var col := int(ch)
+				var col := int(remap[int(ch) % remap.size()])
 				if not by_color.has(col):
 					by_color[col] = []
 				by_color[col].append(r * 4 + c)
@@ -882,6 +898,8 @@ func rpc_contract_end(score: int, pay: int, completeness: float, quality: float,
 		Boot.save_progress(money, difficulty)
 	Boot.play_sfx("fanfare")
 	Boot.close_panels(-1)
+	if Boot.world:
+		Boot.world.clear_board()
 	if Boot.results:
 		Boot.results.show_result(String(contract["title"]), score, completeness, quality, pay, money, early, bug_left, bug_total)
 	_clear_bugs()
