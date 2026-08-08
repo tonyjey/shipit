@@ -20,6 +20,7 @@ var active := false
 var _panel: PanelContainer
 var _rows: Dictionary = {}          # action -> Button
 var _waiting_for := ""
+var _on_close: Callable = Callable()
 var _hint: Label
 
 
@@ -160,7 +161,8 @@ func _refresh() -> void:
 	_hint.text = "Нажми на клавишу справа, затем новую клавишу на клавиатуре"
 
 
-func open_panel() -> void:
+func open_panel(on_close: Callable = Callable()) -> void:
+	_on_close = on_close
 	active = true
 	visible = true
 	_waiting_for = ""
@@ -173,6 +175,10 @@ func close_panel() -> void:
 	visible = false
 	_waiting_for = ""
 	Boot.save_settings()
+	if _on_close.is_valid():
+		var cb := _on_close
+		_on_close = Callable()
+		cb.call()
 
 
 func _input(event: InputEvent) -> void:

@@ -65,9 +65,7 @@ func _build() -> void:
 	box.add_child(HSeparator.new())
 
 	_add_button(box, "Продолжить", func(): close_menu())
-	_add_button(box, "Настройки", func():
-		if Boot.settings_panel:
-			Boot.settings_panel.open_panel())
+	_add_button(box, "Настройки", func(): open_settings())
 	_add_button(box, "Выйти в главное меню", func():
 		close_menu()
 		Boot.leave_to_menu())
@@ -83,9 +81,19 @@ func _add_button(box: VBoxContainer, text: String, action: Callable) -> void:
 	box.add_child(b)
 
 
+## Панель паузы прячется на время настроек — иначе она перекрывает
+## половину списка клавиш.
+func open_settings() -> void:
+	if Boot.settings_panel == null:
+		return
+	_panel.visible = false
+	Boot.settings_panel.open_panel(func(): _panel.visible = active)
+
+
 func open_menu() -> void:
 	active = true
 	visible = true
+	_panel.visible = true
 	_layout()
 	if multiplayer.has_multiplayer_peer():
 		_note.text = "Игра сетевая — мир продолжает жить, пока ты здесь. Дедлайн идёт."

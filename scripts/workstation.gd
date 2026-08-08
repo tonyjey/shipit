@@ -1,4 +1,6 @@
 extends StaticBody3D
+
+const PC_MODEL := "res://models/pc.glb"
 ## Рабочее место. Пока превращает тикет в ассет по таймеру.
 ## На Фазе 2 таймер заменится на мини-игру.
 
@@ -11,6 +13,7 @@ var _total := 0
 var _done := 0
 var _bar: MeshInstance3D
 var _screen_mat: StandardMaterial3D
+var _power_mat: StandardMaterial3D
 
 
 func _ready() -> void:
@@ -47,23 +50,11 @@ func _build() -> void:
 			leg.position = Vector3(sx, 0.36, sz)
 			add_child(leg)
 
-	_screen_mat = StandardMaterial3D.new()
-	_screen_mat.albedo_color = color
-	_screen_mat.emission_enabled = true
-	_screen_mat.emission = color
-	_screen_mat.emission_energy_multiplier = 0.5
-
-	var screen := MeshInstance3D.new()
-	var sm := BoxMesh.new()
-	sm.size = Vector3(0.9, 0.55, 0.06)
-	screen.mesh = sm
-	screen.material_override = _screen_mat
-	screen.position = Vector3(0, 1.2, -0.15)
-	add_child(screen)
+	_build_computer()
 
 	var label := Label3D.new()
 	label.text = title
-	label.position = Vector3(0, 1.7, -0.15)
+	label.position = Vector3(0, 1.66, -0.3)
 	label.billboard = BaseMaterial3D.BILLBOARD_DISABLED
 	label.double_sided = false
 	label.double_sided = false
@@ -79,12 +70,64 @@ func _build() -> void:
 	bar_mat.emission_energy_multiplier = 1.0
 	_bar = MeshInstance3D.new()
 	var bm := BoxMesh.new()
-	bm.size = Vector3(1.0, 0.09, 0.09)
+	bm.size = Vector3(0.42, 0.055, 0.055)
 	_bar.mesh = bm
 	_bar.material_override = bar_mat
-	_bar.position = Vector3(0, 1.53, -0.15)
+	_bar.position = Vector3(0, 1.47, -0.06)
 	_bar.visible = false
 	add_child(_bar)
+
+
+## Ставим на стол модель компьютера. Экран красим в цвет дисциплины —
+## иначе три одинаковых ПК невозможно различить с другого конца офиса.
+func _build_computer() -> void:
+	_screen_mat = StandardMaterial3D.new()
+	_screen_mat.albedo_color = color * 0.55
+	_screen_mat.emission_enabled = true
+	_screen_mat.emission = color
+	_screen_mat.emission_energy_multiplier = 0.6
+
+	var ps = load(PC_MODEL)
+	if ps == null:
+		_build_fallback_screen()
+		return
+
+	var pc: Node3D = ps.instantiate()
+	pc.scale = Vector3(0.01, 0.01, 0.01)
+	pc.rotation_degrees = Vector3(0, 180, 0)   # монитор и клавиатура лицом к игроку
+	pc.position = Vector3(0, 0.845, -0.15)
+	add_child(pc)
+
+	# камеры и источники света из редактора модели в игре не нужны
+	for junk in pc.find_children("*", "Camera3D", true, false):
+		junk.queue_free()
+	for junk in pc.find_children("*", "Light3D", true, false):
+		junk.queue_free()
+
+	var screens := pc.find_children("Screen_Surface", "MeshInstance3D", true, false)
+	if screens.is_empty():
+		_build_fallback_screen()
+		return
+	(screens[0] as MeshInstance3D).set_surface_override_material(0, _screen_mat)
+
+	var buttons := pc.find_children("PowerButton", "MeshInstance3D", true, false)
+	if not buttons.is_empty():
+		_power_mat = StandardMaterial3D.new()
+		_power_mat.albedo_color = Color(0.25, 0.25, 0.23)
+		_power_mat.emission_enabled = true
+		_power_mat.emission = Color(0.3, 1.0, 0.4)
+		_power_mat.emission_energy_multiplier = 0.0
+		(buttons[0] as MeshInstance3D).set_surface_override_material(0, _power_mat)
+
+
+func _build_fallback_screen() -> void:
+	var screen := MeshInstance3D.new()
+	var sm := BoxMesh.new()
+	sm.size = Vector3(0.9, 0.55, 0.06)
+	screen.mesh = sm
+	screen.material_override = _screen_mat
+	screen.position = Vector3(0, 1.2, -0.15)
+	add_child(screen)
 
 
 func output_position() -> Vector3:
@@ -97,13 +140,17 @@ func set_work(total: int, done: int) -> void:
 	_bar.visible = true
 	_bar.scale.x = maxf(float(_done) / float(_total), 0.02)
 	_screen_mat.emission_energy_multiplier = 1.6
+	if _power_mat:
+		_power_mat.emission_energy_multiplier = 1.4
 
 
 func clear_work() -> void:
 	_total = 0
 	_done = 0
 	_bar.visible = false
-	_screen_mat.emission_energy_multiplier = 0.5
+	_screen_mat.emission_energy_multiplier = 0.6
+	if _power_mat:
+		_power_mat.emission_energy_multiplier = 0.0
 
 
 func can_focus(_p) -> bool:

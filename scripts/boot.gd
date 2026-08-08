@@ -2,7 +2,7 @@ extends Node
 ## Точка входа. Автозагрузка "Boot".
 ## Отвечает за: ввод, меню, сеть, спавн игроков, HUD.
 
-const VERSION := "v1.1"
+const VERSION := "v1.2.1"
 const PORT := 7777
 const MAX_PLAYERS := 4
 
@@ -60,7 +60,7 @@ var settings_panel = null
 var pause_menu = null
 var _music: AudioStreamPlayer = null
 var binds: Dictionary = {}
-var volumes: Dictionary = {"master": 0.8, "sfx": 0.8, "music": 0.55}
+var volumes: Dictionary = {"master": 1.0, "sfx": 1.0, "music": 1.0}
 var save_money := 0
 var save_difficulty := 0
 
@@ -367,9 +367,9 @@ func _setup_audio() -> void:
 
 
 func _apply_volumes() -> void:
-	_apply_bus("Master", float(volumes.get("master", 0.8)))
-	_apply_bus("SFX", float(volumes.get("sfx", 0.8)))
-	_apply_bus("Music", float(volumes.get("music", 0.55)))
+	_apply_bus("Master", float(volumes.get("master", 1.0)))
+	_apply_bus("SFX", float(volumes.get("sfx", 1.0)))
+	_apply_bus("Music", float(volumes.get("music", 1.0)))
 
 
 func _apply_bus(bus: String, v: float) -> void:
@@ -381,7 +381,7 @@ func _apply_bus(bus: String, v: float) -> void:
 
 
 func volume_of(bus: String) -> float:
-	return float(volumes.get(bus, 0.8))
+	return float(volumes.get(bus, 1.0))
 
 
 func set_volume(bus: String, v: float) -> void:

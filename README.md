@@ -1,4 +1,4 @@
-# Ship It! — прототип v1.1
+# Ship It! — прототип v1.2.1
 
 Кооп-игра про создание игр. Движок: **Godot 4.7.x** (GDScript). Платформа разработки: **Windows**.
 
@@ -232,6 +232,9 @@ scripts/results.gd     экран сдачи игры
 scripts/pause_menu.gd  меню паузы
 audio/                 звуковые сигналы
 audio/music/           саундтрек (играет только в офисе)
+models/pc.glb          модель рабочего компьютера
+tools/                 исходники модели (исключены из импорта через .gdignore)
+CREDITS.md             источники и лицензии
 MULTIPLAYER.md         как сыграть вдвоём
 export_presets.cfg     готовый пресет сборки .exe
 ```
