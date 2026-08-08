@@ -497,6 +497,13 @@ func _server_interact(pid: int, type: String, id: int) -> void:
 			_server_reveal()
 			return
 
+		"board":
+			# контракт берут вручную — между релизами должна быть передышка
+			if contract_running or testing:
+				return
+			_server_new_contract()
+			return
+
 		"assembler":
 			if held == null:
 				# пустые руки: всё готово — отправляем на тестирование
@@ -629,9 +636,15 @@ func _make_tokens(disc: String) -> Array:
 				out.append("%d:%d" % [int(cell), int(col)])
 		return out
 
-	var pool: Array = WORDS[disc]
+	# Берём слова без повторов: одно и то же слово по три раза подряд
+	# читалось как баг, а не как задание.
+	var pool: Array = WORDS[disc].duplicate()
+	pool.shuffle()
 	for i in TOKENS_PER_TASK:
-		out.append(String(pool[randi() % pool.size()]))
+		if pool.is_empty():
+			pool = WORDS[disc].duplicate()
+			pool.shuffle()
+		out.append(String(pool.pop_back()))
 	# короткие вперёд — сложность нарастает внутри задачи
 	out.sort_custom(func(a, b): return String(a).length() < String(b).length())
 	return out
@@ -801,7 +814,7 @@ func _req_new_contract() -> void:
 
 
 func _server_new_contract() -> void:
-	if contract_running:
+	if contract_running or testing:
 		return
 	_bcast("rpc_clear_round", [])
 	server_start_contract()

@@ -3,6 +3,7 @@ extends Node3D
 
 const StationScript := preload("res://scripts/workstation.gd")
 const AssemblerScript := preload("res://scripts/assembler.gd")
+const BoardScript := preload("res://scripts/board.gd")
 const QaScript := preload("res://scripts/qa_terminal.gd")
 
 const ROOM := 20.0
@@ -20,6 +21,7 @@ var bugs_root: Node3D = null
 var qa: Node3D = null
 var tray: Node3D = null
 var board: Label3D = null
+var board_body: StaticBody3D = null
 
 
 func _ready() -> void:
@@ -55,8 +57,13 @@ func tray_slot(i: int) -> Vector3:
 
 
 func _build_board() -> void:
-	# Доска висит на дальней стене за столами и никуда не поворачивается:
-	# игрок почти всё время смотрит в эту сторону.
+	# Доска — физический объект: к ней подходят и берут контракт.
+	board_body = StaticBody3D.new()
+	board_body.position = Vector3(0, 3.3, -ROOM * 0.5 + 0.4)
+	board_body.add_to_group("interactable")
+	board_body.set_script(BoardScript)
+	add_child(board_body)
+
 	var panel := MeshInstance3D.new()
 	var pm := BoxMesh.new()
 	pm.size = Vector3(9.5, 2.8, 0.15)
@@ -64,14 +71,18 @@ func _build_board() -> void:
 	var pmat := StandardMaterial3D.new()
 	pmat.albedo_color = Color(0.16, 0.18, 0.24)
 	panel.material_override = pmat
-	panel.position = Vector3(0, 3.3, -ROOM * 0.5 + 0.4)
-	add_child(panel)
+	board_body.add_child(panel)
+
+	var cs := CollisionShape3D.new()
+	var bs := BoxShape3D.new()
+	bs.size = Vector3(9.5, 2.8, 0.15)
+	cs.shape = bs
+	board_body.add_child(cs)
 
 	board = Label3D.new()
-	board.text = "ждём контракт..."
+	board.text = "ДОСКА КОНТРАКТОВ\nподойди и нажми E, чтобы взять заказ"
 	board.position = Vector3(0, 3.3, -ROOM * 0.5 + 0.5)
 	board.billboard = BaseMaterial3D.BILLBOARD_DISABLED
-	board.double_sided = false
 	board.double_sided = false
 	board.pixel_size = 0.012
 	board.outline_size = 10

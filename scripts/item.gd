@@ -1,4 +1,6 @@
 extends Node3D
+
+const FLOPPY_MODEL := "res://models/floppy.glb"
 ## Переносимый предмет. Позицией управляет клиент локально:
 ## если предмет в руках — летит за игроком, если нет — лежит там, где сказал сервер.
 
@@ -28,17 +30,15 @@ func _build() -> void:
 	mat.emission = col
 	mat.emission_energy_multiplier = 0.35
 
-	var mesh := MeshInstance3D.new()
 	if kind.begins_with("ticket_"):
-		var card := BoxMesh.new()
-		card.size = Vector3(0.34, 0.44, 0.04)
-		mesh.mesh = card
+		_build_floppy(col)
 	else:
+		var mesh := MeshInstance3D.new()
 		var cube := BoxMesh.new()
 		cube.size = Vector3(0.3, 0.3, 0.3)
 		mesh.mesh = cube
-	mesh.material_override = mat
-	add_child(mesh)
+		mesh.material_override = mat
+		add_child(mesh)
 
 	_label = Label3D.new()
 	var label := _label
@@ -51,6 +51,53 @@ func _build() -> void:
 	label.pixel_size = 0.005
 	label.outline_size = 8
 	add_child(label)
+
+
+## Тикет — дискета. Цвет корпуса задаёт дисциплину: это «скин» модели,
+## остальные детали (наклейка, шторка, втулка) остаются общими.
+func _build_floppy(col: Color) -> void:
+	var ps = load(FLOPPY_MODEL)
+	if ps == null:
+		_build_card_fallback(col)
+		return
+	var floppy: Node3D = ps.instantiate()
+	floppy.scale = Vector3(3.2, 3.2, 3.2)
+	floppy.rotation_degrees = Vector3(90, 0, 0)   # ставим «лицом» к игроку
+	add_child(floppy)
+
+	# в экспорте затесался лишний кубик из сцены Blender
+	for junk in floppy.find_children("Cube", "MeshInstance3D", true, false):
+		junk.queue_free()
+	for junk in floppy.find_children("*", "Camera3D", true, false):
+		junk.queue_free()
+	for junk in floppy.find_children("*", "Light3D", true, false):
+		junk.queue_free()
+
+	var body := floppy.find_children("Floppy_Body", "MeshInstance3D", true, false)
+	if body.is_empty():
+		_build_card_fallback(col)
+		return
+	var body_mat := StandardMaterial3D.new()
+	body_mat.albedo_color = col * 0.75
+	body_mat.emission_enabled = true
+	body_mat.emission = col
+	body_mat.emission_energy_multiplier = 0.25
+	body_mat.roughness = 0.7
+	(body[0] as MeshInstance3D).set_surface_override_material(0, body_mat)
+
+
+func _build_card_fallback(col: Color) -> void:
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = col
+	mat.emission_enabled = true
+	mat.emission = col
+	mat.emission_energy_multiplier = 0.35
+	var mesh := MeshInstance3D.new()
+	var card := BoxMesh.new()
+	card.size = Vector3(0.34, 0.44, 0.04)
+	mesh.mesh = card
+	mesh.material_override = mat
+	add_child(mesh)
 
 
 func _process(delta: float) -> void:

@@ -1,6 +1,14 @@
 extends StaticBody3D
 
 const PC_MODEL := "res://models/pc.glb"
+
+const BAR_COLOR := Color("#55e843")
+const BAR_W := 0.42
+const BAR_H := 0.055
+const BAR_D := 0.045
+const BAR_EDGE := 0.014      # толщина чёрной обводки
+const BAR_Y := 1.47
+const BAR_Z := -0.06
 ## Рабочее место. Пока превращает тикет в ассет по таймеру.
 ## На Фазе 2 таймер заменится на мини-игру.
 
@@ -11,7 +19,7 @@ var color := Color.WHITE
 
 var _total := 0
 var _done := 0
-var _bar: MeshInstance3D
+var _bar: Node3D
 var _screen_mat: StandardMaterial3D
 var _power_mat: StandardMaterial3D
 
@@ -62,20 +70,39 @@ func _build() -> void:
 	label.outline_size = 8
 	add_child(label)
 
-	# полоса прогресса
+	# полоса прогресса: чёрная рамка + зелёная заливка, растущая слева направо
+	var frame_mat := StandardMaterial3D.new()
+	frame_mat.albedo_color = Color(0.02, 0.02, 0.02)
+	frame_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+
+	var frame := MeshInstance3D.new()
+	var fm := BoxMesh.new()
+	fm.size = Vector3(BAR_W + BAR_EDGE * 2.0, BAR_H + BAR_EDGE * 2.0, BAR_D)
+	frame.mesh = fm
+	frame.material_override = frame_mat
+	frame.position = Vector3(0, BAR_Y, BAR_Z - 0.004)
+	add_child(frame)
+
 	var bar_mat := StandardMaterial3D.new()
-	bar_mat.albedo_color = Color(0.4, 1.0, 0.5)
+	bar_mat.albedo_color = BAR_COLOR
+	bar_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	bar_mat.emission_enabled = true
-	bar_mat.emission = Color(0.4, 1.0, 0.5)
-	bar_mat.emission_energy_multiplier = 1.0
-	_bar = MeshInstance3D.new()
-	var bm := BoxMesh.new()
-	bm.size = Vector3(0.42, 0.055, 0.055)
-	_bar.mesh = bm
-	_bar.material_override = bar_mat
-	_bar.position = Vector3(0, 1.47, -0.06)
+	bar_mat.emission = BAR_COLOR
+	bar_mat.emission_energy_multiplier = 0.9
+
+	# пивот стоит у левого края, поэтому масштаб растит полосу вправо
+	_bar = Node3D.new()
+	_bar.position = Vector3(-BAR_W * 0.5, BAR_Y, BAR_Z)
 	_bar.visible = false
 	add_child(_bar)
+
+	var fill := MeshInstance3D.new()
+	var bm := BoxMesh.new()
+	bm.size = Vector3(BAR_W, BAR_H, BAR_D)
+	fill.mesh = bm
+	fill.material_override = bar_mat
+	fill.position = Vector3(BAR_W * 0.5, 0, 0)
+	_bar.add_child(fill)
 
 
 ## Ставим на стол модель компьютера. Экран красим в цвет дисциплины —
@@ -98,7 +125,6 @@ func _build_computer() -> void:
 	pc.position = Vector3(0, 0.845, -0.15)
 	add_child(pc)
 
-	# камеры и источники света из редактора модели в игре не нужны
 	for junk in pc.find_children("*", "Camera3D", true, false):
 		junk.queue_free()
 	for junk in pc.find_children("*", "Light3D", true, false):

@@ -105,10 +105,7 @@ func show_result(title: String, score: int, completeness: float, quality: float,
 	lines.append("Гонорар: $%d     На счету: $%d" % [pay, money])
 	_body.text = "\n".join(lines)
 
-	if Boot.is_host():
-		_hint.text = "[Enter] — взять новый контракт"
-	else:
-		_hint.text = "Ждём, пока хост возьмёт новый контракт"
+	_hint.text = "[Enter] — закрыть.   Новый контракт берут на доске у дальней стены"
 
 
 func close() -> void:
@@ -131,6 +128,6 @@ static func verdict_for(score: int) -> String:
 func _input(event: InputEvent) -> void:
 	if not active:
 		return
-	if event.is_action_pressed("ui_accept") and Boot.is_host():
+	if event.is_action_pressed("ui_accept"):
 		get_viewport().set_input_as_handled()
-		Game.request_new_contract()
+		close()

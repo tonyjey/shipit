@@ -2,7 +2,7 @@ extends Node
 ## Точка входа. Автозагрузка "Boot".
 ## Отвечает за: ввод, меню, сеть, спавн игроков, HUD.
 
-const VERSION := "v1.2.1"
+const VERSION := "v1.3"
 const PORT := 7777
 const MAX_PLAYERS := 4
 
@@ -478,7 +478,6 @@ func _solo() -> void:
 	ready_peers = [1]
 	_spawn_player(1, 1)
 	Game.apply_progress(save_money, save_difficulty)
-	Game.server_start_contract()
 
 
 func _on_connected_ok() -> void:
@@ -562,7 +561,7 @@ func _enter_game() -> void:
 	get_tree().current_scene.add_child(world)
 	set_mouse_captured(true)
 	start_music()
-	toast("WASD — ходить, E — взаимодействие, Q — бросить.   Esc — пауза", 7.0)
+	toast("Возьми контракт на доске у дальней стены — подойди и нажми E", 8.0)
 	if terminal:
 		terminal.close()
 
@@ -794,8 +793,8 @@ func is_host() -> bool:
 func update_contract_hud() -> void:
 	if _contract_label == null:
 		return
-	if Game.contract.is_empty():
-		_contract_label.text = ""
+	if Game.contract.is_empty() or not Game.contract_running:
+		_contract_label.text = "Контракта нет\nВозьми заказ на доске\nСчёт студии: $%d" % Game.money
 		return
 	var lines: PackedStringArray = []
 	lines.append("Контракт №%d  ·  %s" % [int(Game.contract.get("index", 1)), String(Game.contract["title"])])
