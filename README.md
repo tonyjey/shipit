@@ -1,4 +1,4 @@
-# Ship It! — прототип v1.8
+# Ship It! — прототип v1.10
 
 Кооп-игра про создание игр. Движок: **Godot 4.7.x** (GDScript). Платформа разработки: **Windows**.
 
@@ -247,10 +247,12 @@ audio/                 звуковые сигналы
 audio/music/           саундтрек (играет только в офисе)
 models/pc.glb          модель рабочего компьютера
 models/floppy.glb      дискета — она же тикет задачи
+models/assembler.glb   сборочная машина (дупликатор дискет)
 scripts/board.gd       доска контрактов
 scripts/naming.gd      название игры и голосование
 tools/                 исходники моделей и ТЗ (исключены из импорта через .gdignore)
-tools/ASSEMBLER_SPEC.md что нужно от модели сборочной машины
+tools/ASSEMBLER_SPEC.md ТЗ на модель сборочной машины
+tools/CHARACTER_SPEC.md ТЗ на модель персонажа
 CREDITS.md             источники и лицензии
 MULTIPLAYER.md         как сыграть вдвоём
 export_presets.cfg     готовый пресет сборки .exe

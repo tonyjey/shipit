@@ -2,7 +2,7 @@ extends Node
 ## Точка входа. Автозагрузка "Boot".
 ## Отвечает за: ввод, меню, сеть, спавн игроков, HUD.
 
-const VERSION := "v1.8"
+const VERSION := "v1.10"
 const PORT := 7777
 const MAX_PLAYERS := 4
 

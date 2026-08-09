@@ -2,7 +2,7 @@ extends StaticBody3D
 ## Дверь в холодную комнату. Петля слева, створка поворачивается на 95°.
 ## Состояние хранит сервер, чтобы у всех дверь стояла одинаково.
 
-const OPEN_ANGLE := -95.0
+const OPEN_ANGLE := 95.0
 const SPEED := 260.0      # градусов в секунду
 
 var door_id := 0
@@ -16,9 +16,14 @@ func _ready() -> void:
 	add_to_group("interactable")
 
 
-func set_open(v: bool) -> void:
+## dir = +1 створка уходит в +X, -1 — в -X. Считаем от того,
+## с какой стороны стоит игрок: дверь распахивается прочь от него.
+func set_open(v: bool, dir := 1) -> void:
 	is_open = v
-	_target = OPEN_ANGLE if v else 0.0
+	if v:
+		_target = OPEN_ANGLE * signf(float(dir))
+	else:
+		_target = 0.0
 
 
 func _process(delta: float) -> void:

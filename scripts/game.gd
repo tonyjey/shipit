@@ -410,7 +410,7 @@ func server_send_snapshot(to_id: int) -> void:
 		rpc_id(to_id, "rpc_work_occupant", int(idx), int(w["occupant"]))
 	if Boot.world:
 		for i in Boot.world.doors.size():
-			rpc_id(to_id, "rpc_door", i, bool(Boot.world.doors[i].is_open))
+			rpc_id(to_id, "rpc_door", i, bool(Boot.world.doors[i].is_open), 1)
 	if contract_running:
 		rpc_id(to_id, "rpc_contract_start", contract)
 		rpc_id(to_id, "rpc_contract_time", contract_time)
@@ -528,7 +528,13 @@ func _server_interact(pid: int, type: String, id: int) -> void:
 		"door":
 			if Boot.world == null or id < 0 or id >= Boot.world.doors.size():
 				return
-			_bcast("rpc_door", [id, not bool(Boot.world.doors[id].is_open)])
+			var dr = Boot.world.doors[id]
+			var swing := 1
+			if Boot.players.has(pid):
+				var who := Boot.players[pid] as Node3D
+				# распахиваем от игрока, а не ему в лицо
+				swing = 1 if who.global_position.x < dr.global_position.x else -1
+			_bcast("rpc_door", [id, not bool(dr.is_open), swing])
 			return
 
 		"board":
@@ -756,10 +762,10 @@ func rpc_voting_start(opts: Array, owners: Array, seconds: float) -> void:
 
 
 @rpc("authority", "call_local", "reliable")
-func rpc_door(id: int, open_state: bool) -> void:
+func rpc_door(id: int, open_state: bool, swing := 1) -> void:
 	if Boot.world == null or id < 0 or id >= Boot.world.doors.size():
 		return
-	Boot.world.doors[id].set_open(open_state)
+	Boot.world.doors[id].set_open(open_state, swing)
 	Boot.play_sfx("click")
 
 
@@ -810,8 +816,8 @@ func _make_tokens(disc: String) -> Array:
 			pick = (pick + 1 + randi() % (SPRITES.size() - 1)) % SPRITES.size()
 		_last_sprite = pick
 		var tpl: Array = SPRITES[pick]
-		var remap := [0, 1, 2, 3]
-		remap.shuffle()
+		var palette_map := [0, 1, 2, 3]
+		palette_map.shuffle()
 		var by_color: Dictionary = {}
 		for r in tpl.size():
 			var row: String = tpl[r]
@@ -819,7 +825,7 @@ func _make_tokens(disc: String) -> Array:
 				var ch := row.substr(c, 1)
 				if ch == ".":
 					continue
-				var col := int(remap[int(ch) % remap.size()])
+				var col := int(palette_map[int(ch) % palette_map.size()])
 				if not by_color.has(col):
 					by_color[col] = []
 				by_color[col].append(r * 4 + c)
@@ -1095,6 +1101,8 @@ func rpc_contract_end(title: String, score: int, pay: int, completeness: float, 
 	Boot.close_panels(-1)
 	if Boot.world:
 		Boot.world.clear_board()
+		if Boot.world.assembler:
+			Boot.world.assembler.set_count(0, 1.0)
 	if Boot.results:
 		Boot.results.show_result(title, String(contract["title"]), score, completeness, quality, pay, money, early, bug_left, bug_total, history)
 	_clear_bugs()

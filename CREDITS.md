@@ -17,6 +17,9 @@
 **Дискета** (`models/floppy.glb`) — сделана Amon в Blender по скрипту
 `tools/stylized_35_floppy_disk_blender.py`. Экспорт сразу в glTF.
 
+**Сборочная машина** (`models/assembler.glb`) — сделана Amon в Blender
+по техзаданию из `tools/ASSEMBLER_SPEC.md`.
+
 ## Звуковые эффекты
 `audio/*.wav` синтезированы программно для этого проекта, сторонних прав нет.
 
