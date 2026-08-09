@@ -2,7 +2,7 @@ extends Node
 ## Точка входа. Автозагрузка "Boot".
 ## Отвечает за: ввод, меню, сеть, спавн игроков, HUD.
 
-const VERSION := "v1.5"
+const VERSION := "v1.8"
 const PORT := 7777
 const MAX_PLAYERS := 4
 
@@ -57,6 +57,7 @@ var rhythm = null
 var paint = null
 var mouse_wanted := false
 var _crosshair: ColorRect = null
+var focus_node: Node = null   # на что сейчас наведён прицел локального игрока
 var settings_panel = null
 var pause_menu = null
 var naming_panel = null
@@ -567,7 +568,7 @@ func _enter_game() -> void:
 	get_tree().current_scene.add_child(world)
 	set_mouse_captured(true)
 	start_music()
-	toast("Возьми контракт на доске у дальней стены — подойди и нажми E", 8.0)
+	toast("Контракт берут у издателя: дверь в правой стене, откроется по E", 9.0)
 	if terminal:
 		terminal.close()
 
@@ -807,7 +808,7 @@ func update_contract_hud() -> void:
 	if _contract_label == null:
 		return
 	if Game.contract.is_empty() or not Game.contract_running:
-		_contract_label.text = "Контракта нет\nВозьми заказ на доске\nСчёт студии: $%d" % Game.money
+		_contract_label.text = "Контракта нет\nЗайди к издателю (дверь справа)\nСчёт студии: $%d" % Game.money
 		return
 	var lines: PackedStringArray = []
 	lines.append("Контракт №%d  ·  %s" % [int(Game.contract.get("index", 1)), String(Game.contract["title"])])

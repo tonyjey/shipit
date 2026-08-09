@@ -130,7 +130,7 @@ func open_voting(names: Array, seconds: float) -> void:
 	_left = seconds
 	_layout()
 	_title.text = "ГОЛОСОВАНИЕ"
-	_sub.text = "Выбери название. За своё голосовать нельзя."
+	_sub.text = "Выбери название. Можно голосовать и за своё."
 	_edit.visible = false
 	_send.visible = false
 	_status.text = ""
@@ -141,7 +141,6 @@ func open_voting(names: Array, seconds: float) -> void:
 		var idx := i
 		b.pressed.connect(func(): _vote(idx))
 		if int(Game.name_owner(idx)) == Boot.local_id():
-			b.disabled = true
 			b.text += "   (твоё)"
 		_list.add_child(b)
 	Boot.set_mouse_captured(false)

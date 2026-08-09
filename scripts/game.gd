@@ -41,9 +41,9 @@ const WORDS := {
 }
 
 const WEEK_SECONDS := 90.0
-const BASE_PACE := 30.0     # секунд на задачу в первом контракте
-const MIN_PACE := 21.0      # к чему сходится темп при росте сложности
-const PACE_STEP := 1.2      # насколько поджимается темп за каждый контракт
+const BASE_PACE := 34.0     # секунд на задачу в первом контракте
+const MIN_PACE := 24.0      # к чему сходится темп при росте сложности
+const PACE_STEP := 1.3      # насколько поджимается темп за каждый контракт
 
 const CONTRACTS := [
 	{"title": "Слэшер / Средневековье", "need": {"code": 3, "art": 3, "music": 3}, "weeks": 3, "pay": 1800},
@@ -408,6 +408,9 @@ func server_send_snapshot(to_id: int) -> void:
 		rpc_id(to_id, "rpc_work_begin", int(idx), String(w["disc"]), w["tokens"], 0)
 		rpc_id(to_id, "rpc_work_progress", int(idx), int(w["done"]), int(w["mistakes"]), w["filled"])
 		rpc_id(to_id, "rpc_work_occupant", int(idx), int(w["occupant"]))
+	if Boot.world:
+		for i in Boot.world.doors.size():
+			rpc_id(to_id, "rpc_door", i, bool(Boot.world.doors[i].is_open))
 	if contract_running:
 		rpc_id(to_id, "rpc_contract_start", contract)
 		rpc_id(to_id, "rpc_contract_time", contract_time)
@@ -520,6 +523,12 @@ func _server_interact(pid: int, type: String, id: int) -> void:
 
 		"qa":
 			_server_reveal()
+			return
+
+		"door":
+			if Boot.world == null or id < 0 or id >= Boot.world.doors.size():
+				return
+			_bcast("rpc_door", [id, not bool(Boot.world.doors[id].is_open)])
 			return
 
 		"board":
@@ -666,8 +675,6 @@ func _server_vote(pid: int, idx: int) -> void:
 		return
 	if idx < 0 or idx >= name_options.size():
 		return
-	if int(name_owners[idx]) == pid:
-		return
 	_votes[pid] = idx
 	_bcast("rpc_phase_progress", [_votes.size(), maxi(Boot.players.size(), 1)])
 	if _votes.size() >= maxi(Boot.players.size(), 1):
@@ -746,6 +753,14 @@ func rpc_voting_start(opts: Array, owners: Array, seconds: float) -> void:
 	name_owners = owners.duplicate()
 	if Boot.naming_panel:
 		Boot.naming_panel.open_voting(name_options, seconds)
+
+
+@rpc("authority", "call_local", "reliable")
+func rpc_door(id: int, open_state: bool) -> void:
+	if Boot.world == null or id < 0 or id >= Boot.world.doors.size():
+		return
+	Boot.world.doors[id].set_open(open_state)
+	Boot.play_sfx("click")
 
 
 @rpc("authority", "call_local", "reliable")
@@ -944,6 +959,8 @@ func apply_progress(saved_money: int, saved_difficulty: int, saved_history: Arra
 	money = saved_money
 	difficulty = saved_difficulty
 	history = saved_history.duplicate()
+	if Boot.world:
+		Boot.world.set_shelf(history)
 
 
 func server_start_contract() -> void:
@@ -1066,6 +1083,8 @@ func rpc_contract_end(title: String, score: int, pay: int, completeness: float, 
 	if Boot.naming_panel:
 		Boot.naming_panel.close()
 	history.append({"title": title, "score": score})
+	if Boot.world:
+		Boot.world.set_shelf(history)
 	contract_running = false
 	money += pay
 	difficulty += 1

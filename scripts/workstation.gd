@@ -122,6 +122,14 @@ func _build_computer() -> void:
 		_build_fallback_screen()
 		return
 
+	# Коллизия самого компьютера: без неё в монитор можно было войти.
+	var pc_cs := CollisionShape3D.new()
+	var pc_bs := BoxShape3D.new()
+	pc_bs.size = Vector3(0.50, 0.60, 0.46)
+	pc_cs.shape = pc_bs
+	pc_cs.position = Vector3(0, 1.145, -0.14)
+	add_child(pc_cs)
+
 	var pc: Node3D = ps.instantiate()
 	pc.scale = Vector3(0.01, 0.01, 0.01)
 	pc.rotation_degrees = Vector3(0, 180, 0)   # монитор и клавиатура лицом к игроку

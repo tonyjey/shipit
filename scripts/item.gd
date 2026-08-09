@@ -115,10 +115,10 @@ func _process(delta: float) -> void:
 		rotation.y = _spin
 		global_position = global_position.lerp(target_pos, clampf(delta * 14.0, 0.0, 1.0))
 
-	# подписи предметов видно только рядом — иначе экран превращается в кашу
+	# Подпись показываем только у предмета под прицелом. Раньше подписывались
+	# все предметы в радиусе, и лоток превращался в кашу из наложенных строк.
 	if _label:
-		var me = Boot.local_player()
-		_label.visible = me != null and global_position.distance_to(me.global_position) < 3.6
+		_label.visible = Boot.focus_node == self
 
 
 func can_focus(p) -> bool:

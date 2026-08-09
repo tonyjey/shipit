@@ -194,6 +194,7 @@ func _local_step(delta: float) -> void:
 			Boot.set_prompt("")
 		Boot.set_hint("")
 		_focus = null
+		Boot.focus_node = null
 		return
 	else:
 		_update_focus()
@@ -230,6 +231,7 @@ func _update_focus() -> void:
 			best = n3
 
 	_focus = best
+	Boot.focus_node = best
 	if _focus and _focus.has_method("get_prompt"):
 		Boot.set_prompt(_focus.get_prompt(self))
 	else:
