@@ -11,6 +11,9 @@ build/
 # Локальные файлы проверки
 check_log.txt
 godot_path.txt
+blender_path.txt
+tools/blender_log.txt
+tools/godot_rig_log.txt
 
 # Системный мусор
 .DS_Store

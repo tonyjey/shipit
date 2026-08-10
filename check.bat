@@ -27,6 +27,27 @@ echo.
 :RUN
 set /p GODOT=<godot_path.txt
 set "GODOT=!GODOT:"=!"
+
+rem godot_path.txt may contain a FOLDER instead of the .exe - resolve it.
+if not exist "!GODOT!\" goto HAVE_EXE
+set "FOUND="
+for %%F in ("!GODOT!\*console*.exe") do set "FOUND=%%~fF"
+if not defined FOUND for %%F in ("!GODOT!\Godot*.exe") do set "FOUND=%%~fF"
+if not defined FOUND for %%F in ("!GODOT!\godot*.exe") do set "FOUND=%%~fF"
+if not defined FOUND (
+    echo [x] godot_path.txt points to a folder with no Godot executable inside:
+    echo     !GODOT!
+    echo     Put the full path to Godot_v4.7...exe into godot_path.txt
+    pause
+    exit /b 1
+)
+set "GODOT=!FOUND!"
+>godot_path.txt echo !GODOT!
+echo [i] Resolved Godot executable:
+echo     !GODOT!
+echo.
+
+:HAVE_EXE
 if not exist "!GODOT!" (
     echo [!] Godot not found at: !GODOT!
     echo     Delete godot_path.txt and run check.bat again.
