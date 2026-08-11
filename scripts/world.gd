@@ -7,6 +7,7 @@ const BoardScript := preload("res://scripts/board.gd")
 const QaScript := preload("res://scripts/qa_terminal.gd")
 const DoorScript := preload("res://scripts/door.gd")
 const BossScript := preload("res://scripts/boss_desk.gd")
+const ShopCounterScript := preload("res://scripts/shop_counter.gd")
 
 const ROOM := 26.0            # рабочий этаж стал шире примерно на 30%
 const WALL_H := 4.0
@@ -20,6 +21,12 @@ const OFFICE_X0 := 13.0
 const OFFICE_X1 := 22.0
 const OFFICE_Z0 := -5.0
 const OFFICE_Z1 := 5.0
+
+# магазин — зеркально, у левой стены
+const SHOP_X0 := -22.0
+const SHOP_X1 := -13.0
+const SHOP_Z0 := -5.0
+const SHOP_Z1 := 5.0
 
 const STATIONS := [
 	{"disc": "code",  "title": "Код",     "color": Color(0.40, 0.70, 1.00)},
@@ -37,6 +44,7 @@ var board: Label3D = null
 var board_body: StaticBody3D = null
 var doors: Array = []
 var boss_desk: StaticBody3D = null
+var shop_counter: StaticBody3D = null
 var shelf_labels: Array = []
 var shelf_boxes: Array = []
 
@@ -60,6 +68,7 @@ func _ready() -> void:
 	_build_tray()
 	_build_board()
 	_build_office()
+	_build_shop()
 	_build_doors()
 
 
@@ -195,7 +204,12 @@ func _build_walls() -> void:
 	var half := ROOM * 0.5
 	_box(Vector3(ROOM, h, t), Vector3(0, h * 0.5, -half), c)
 	_box(Vector3(ROOM, h, t), Vector3(0, h * 0.5, half), c)
-	_box(Vector3(t, h, ROOM), Vector3(-half, h * 0.5, 0), c)
+	# левая стена с проёмом в магазин
+	var gap_l := DOOR_W * 0.5
+	var seg_l := (half - gap_l)
+	_box(Vector3(t, h, seg_l), Vector3(-half, h * 0.5, -gap_l - seg_l * 0.5), c)
+	_box(Vector3(t, h, seg_l), Vector3(-half, h * 0.5, gap_l + seg_l * 0.5), c)
+	_box(Vector3(t, h - DOOR_H, DOOR_W), Vector3(-half, DOOR_H + (h - DOOR_H) * 0.5, 0), c)
 
 	# правая стена с проёмом в кабинет
 	var gap := DOOR_W * 0.5
@@ -478,9 +492,14 @@ func set_shelf(history: Array) -> void:
 
 
 func _build_doors() -> void:
+	_make_door(0, ROOM * 0.5)
+	_make_door(1, -ROOM * 0.5)
+
+
+func _make_door(id: int, x: float) -> void:
 	var d := DoorScript.new()
-	d.door_id = 0
-	d.position = Vector3(ROOM * 0.5, 0, -DOOR_W * 0.5)   # петля у края проёма
+	d.door_id = id
+	d.position = Vector3(x, 0, -DOOR_W * 0.5)   # петля у края проёма
 	add_child(d)
 	doors.append(d)
 
@@ -501,6 +520,87 @@ func _build_doors() -> void:
 	cs.shape = bs
 	cs.position = Vector3(0, DOOR_H * 0.5, DOOR_W * 0.5)
 	d.add_child(cs)
+
+
+## Магазин: та же холодная комната, что и кабинет, только зеркально.
+func _build_shop() -> void:
+	var c := Color(0.84, 0.88, 0.86)
+	var w := SHOP_X1 - SHOP_X0
+	var d := SHOP_Z1 - SHOP_Z0
+	var cx := (SHOP_X0 + SHOP_X1) * 0.5
+
+	_box(Vector3(w, 1.0, d), Vector3(cx, -0.5, 0), Color(0.50, 0.55, 0.52))
+	_box(Vector3(w, WALL_H, WALL_T), Vector3(cx, WALL_H * 0.5, SHOP_Z0), c)
+	_box(Vector3(w, WALL_H, WALL_T), Vector3(cx, WALL_H * 0.5, SHOP_Z1), c)
+	_box(Vector3(WALL_T, WALL_H, d), Vector3(SHOP_X0, WALL_H * 0.5, 0), c)
+
+	# прилавок
+	var wood := StandardMaterial3D.new()
+	wood.albedo_color = Color(0.34, 0.26, 0.20)
+
+	shop_counter = StaticBody3D.new()
+	shop_counter.position = Vector3(cx - 0.6, 0, 0)
+	shop_counter.set_script(ShopCounterScript)
+	add_child(shop_counter)
+
+	var top := MeshInstance3D.new()
+	var tm := BoxMesh.new()
+	tm.size = Vector3(0.9, 0.14, 3.2)
+	top.mesh = tm
+	top.material_override = wood
+	top.position = Vector3(0, 1.02, 0)
+	shop_counter.add_child(top)
+
+	var front := MeshInstance3D.new()
+	var fm := BoxMesh.new()
+	fm.size = Vector3(0.7, 0.95, 3.0)
+	front.mesh = fm
+	var front_mat := StandardMaterial3D.new()
+	front_mat.albedo_color = Color(0.55, 0.50, 0.46)
+	front.material_override = front_mat
+	front.position = Vector3(0, 0.48, 0)
+	shop_counter.add_child(front)
+
+	var cs := CollisionShape3D.new()
+	var bs := BoxShape3D.new()
+	bs.size = Vector3(0.9, 1.1, 3.2)
+	cs.shape = bs
+	cs.position = Vector3(0, 0.55, 0)
+	shop_counter.add_child(cs)
+
+	var sign_label := Label3D.new()
+	sign_label.text = "МАГАЗИН\nНАВЫКОВ"
+	sign_label.position = Vector3(cx - 0.15, 2.5, 0)
+	sign_label.rotation_degrees = Vector3(0, 90, 0)
+	sign_label.billboard = BaseMaterial3D.BILLBOARD_DISABLED
+	sign_label.double_sided = false
+	sign_label.pixel_size = 0.009
+	sign_label.outline_size = 10
+	sign_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	add_child(sign_label)
+
+	# витрина за прилавком
+	var shelf_mat := StandardMaterial3D.new()
+	shelf_mat.albedo_color = Color(0.40, 0.42, 0.46)
+	for row in 2:
+		var plank := MeshInstance3D.new()
+		var pm := BoxMesh.new()
+		pm.size = Vector3(0.45, 0.08, 4.0)
+		plank.mesh = pm
+		plank.material_override = shelf_mat
+		plank.position = Vector3(SHOP_X0 + 0.5, 1.1 + float(row) * 0.7, 0)
+		add_child(plank)
+
+		for i in 5:
+			var box := MeshInstance3D.new()
+			var bm := BoxMesh.new()
+			bm.size = Vector3(0.22, 0.3, 0.22)
+			box.mesh = bm
+			var m := StandardMaterial3D.new()
+			m.albedo_color = Color(0.45 + 0.1 * float(i % 3), 0.62, 0.55 + 0.08 * float(row))
+			box.material_override = m
+			box.position = Vector3(SHOP_X0 + 0.5, 1.29 + float(row) * 0.7, -1.6 + float(i) * 0.8)
+			add_child(box)
 
 
 func _build_stations() -> void:

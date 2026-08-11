@@ -213,11 +213,32 @@ func _physics_process(delta: float) -> void:
 		rotation.y = lerp_angle(rotation.y, _net_yaw, t)
 
 	if visual:
-		var carrying := Game.held_item_of(peer_id) != null
+		var carrying := not Game.held_items_of(peer_id).is_empty()
 		visual.set_carrying(carrying)
 		if carrying != _carrying_now:
 			_carrying_now = carrying
 			_apply_view()
+
+
+## Навыки влияют только на локального игрока: остальным его позиция
+## всё равно приезжает по сети готовой.
+func current_speed() -> float:
+	if not is_local:
+		return SPEED
+	var mul := 1.0
+	if Boot.has_skill("fast_legs"):
+		mul += 0.15
+	if Boot.has_skill("second_wind") and Game.contract_running:
+		var total := Game.deadline_seconds()
+		if total > 0.0 and Game.contract_time > total * 0.75:
+			mul += 0.30
+	return SPEED * mul
+
+
+func current_reach() -> float:
+	if is_local and Boot.has_skill("long_arms"):
+		return 3.7
+	return REACH
 
 
 func _local_step(delta: float) -> void:
@@ -232,7 +253,7 @@ func _local_step(delta: float) -> void:
 	if Boot.mouse_wanted and not Game.is_local_busy():
 		input_dir = Input.get_vector("move_left", "move_right", "move_forward", "move_back")
 	var dir := (transform.basis * Vector3(input_dir.x, 0, input_dir.y)).normalized()
-	var target := dir * SPEED
+	var target := dir * current_speed()
 	velocity.x = move_toward(velocity.x, target.x, ACCEL * delta * 4.0)
 	velocity.z = move_toward(velocity.z, target.z, ACCEL * delta * 4.0)
 
@@ -272,7 +293,7 @@ func _update_focus() -> void:
 		var to: Vector3 = n3.global_position - global_position
 		to.y = 0.0
 		var d: float = to.length()
-		if d > REACH:
+		if d > current_reach():
 			continue
 		var dot: float = 1.0
 		if d > 0.05:
@@ -291,11 +312,14 @@ func _update_focus() -> void:
 	else:
 		Boot.set_prompt("")
 
-	var held = Game.held_item_of(peer_id)
-	if held != null:
-		Boot.set_hint("В руках: %s     [Q] бросить" % Game.title_of(held.kind))
-	else:
+	var carried := Game.held_items_of(peer_id)
+	if carried.is_empty():
 		Boot.set_hint("")
+	else:
+		var names: PackedStringArray = []
+		for it in carried:
+			names.append(Game.title_of(String(it.kind)))
+		Boot.set_hint("В руках: %s     [Q] бросить" % "  +  ".join(names))
 
 
 @rpc("any_peer", "unreliable_ordered")

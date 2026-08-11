@@ -206,11 +206,10 @@ func get_prompt(p) -> String:
 		if occ == int(p.peer_id):
 			return "%s — ты работаешь здесь" % title
 		return "%s — занято игроком P%d" % [title, int(Boot.slots.get(occ, occ))]
-	var h = Game.held_item_of(p.peer_id)
-	if h == null:
-		return "%s — принеси тикет из лотка" % title
-	if String(h.kind) == "ticket_" + discipline:
+	if Game.held_of_kind(p.peer_id, "ticket_" + discipline) != null:
 		return "[E] Сесть за работу — %s" % title
+	if Game.held_items_of(p.peer_id).is_empty():
+		return "%s — принеси тикет из лотка" % title
 	return "%s — нужен другой тикет" % title
 
 

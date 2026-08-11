@@ -59,6 +59,7 @@ var bugs_total := 0
 var bugs_caught := 0
 var round_mistakes := 0
 var _last_sprite := -1
+var peer_skills: Dictionary = {}   # pid -> {id: true}
 
 # фаза «как назовём игру»
 var naming := false
@@ -484,7 +485,9 @@ func _server_interact(pid: int, type: String, id: int) -> void:
 
 	match type:
 		"item":
-			if held != null or not items.has(id):
+			if not items.has(id):
+				return
+			if held_items_of(pid).size() >= carry_capacity(pid):
 				return
 			var it = items[id]
 			if it.holder != 0:
@@ -497,6 +500,7 @@ func _server_interact(pid: int, type: String, id: int) -> void:
 			if id < 0 or id >= Boot.world.stations.size():
 				return
 			var st = Boot.world.stations[id]
+			held = _pick_held(pid, "ticket_" + String(st.discipline))
 			if work.has(id):
 				# стол уже занят задачей — можно подхватить чужую работу
 				if int(work[id]["occupant"]) == 0:
@@ -537,6 +541,11 @@ func _server_interact(pid: int, type: String, id: int) -> void:
 			_bcast("rpc_door", [id, not bool(dr.is_open), swing])
 			return
 
+		"shop":
+			if pid == Boot.local_id() and Boot.shop_panel:
+				Boot.shop_panel.open_shop()
+			return
+
 		"board":
 			# контракт берут вручную — между релизами должна быть передышка
 			if contract_running or testing:
@@ -545,6 +554,7 @@ func _server_interact(pid: int, type: String, id: int) -> void:
 			return
 
 		"assembler":
+			held = _pick_held(pid, "asset_")
 			if held == null:
 				# пустые руки: всё готово — отправляем на тестирование
 				if contract_running and not testing and requirements_met():
@@ -560,12 +570,27 @@ func _server_interact(pid: int, type: String, id: int) -> void:
 				Boot.play_sfx("deliver")
 
 
+## Ищем в руках предмет нужного вида. С двумя руками их может быть два,
+## и брать всегда первый попавшийся — верный способ обидеть игрока.
+## Публичная версия для подсказок у столов и сборщика.
+func held_of_kind(pid: int, prefix: String):
+	return _pick_held(pid, prefix)
+
+
+func _pick_held(pid: int, prefix: String):
+	for it in held_items_of(pid):
+		if String(it.kind).begins_with(prefix):
+			return it
+	return null
+
+
 func _server_drop(pid: int) -> void:
 	if not _is_server():
 		return
-	var held = held_item_of(pid)
-	if held == null or not Boot.players.has(pid):
+	var list := held_items_of(pid)
+	if list.is_empty() or not Boot.players.has(pid):
 		return
+	var held = list[list.size() - 1]   # бросаем то, что взяли последним
 	var p := Boot.players[pid] as Node3D
 	var fwd := -p.global_transform.basis.z
 	_bcast("rpc_item_state", [held.item_id, 0, safe_drop_point(p, fwd)])
@@ -636,6 +661,58 @@ func name_owner(idx: int) -> int:
 	if idx < 0 or idx >= name_owners.size():
 		return 0
 	return int(name_owners[idx])
+
+
+## Клиент сообщает серверу свои навыки: часть из них — правила, а правила
+## живут на сервере (например, сколько предметов можно нести).
+func push_skills() -> void:
+	var list: Array = Boot.skills.keys()
+	if _is_server():
+		_server_skills(Boot.local_id(), list)
+	else:
+		rpc_id(1, "_req_skills", list)
+
+
+@rpc("any_peer", "reliable")
+func _req_skills(list: Array) -> void:
+	if _is_server():
+		_server_skills(multiplayer.get_remote_sender_id(), list)
+
+
+func _server_skills(pid: int, list: Array) -> void:
+	var d := {}
+	for id in list:
+		d[String(id)] = true
+	peer_skills[pid] = d
+
+
+func peer_has(pid: int, id: String) -> bool:
+	if not peer_skills.has(pid):
+		return false
+	return bool(peer_skills[pid].has(id))
+
+
+func carry_capacity(pid: int) -> int:
+	return 2 if peer_has(pid, "two_hands") else 1
+
+
+## Все предметы в руках игрока, по порядку взятия.
+func held_items_of(pid: int) -> Array:
+	var out: Array = []
+	for it in items.values():
+		if it.holder == pid:
+			out.append(it)
+	out.sort_custom(func(a, b): return int(a.item_id) < int(b.item_id))
+	return out
+
+
+## Какой по счёту предмет в руках — нужно, чтобы разложить их по ладоням.
+func hold_index_of(item_id: int, pid: int) -> int:
+	var list := held_items_of(pid)
+	for i in list.size():
+		if int(list[i].item_id) == item_id:
+			return i
+	return 0
 
 
 func request_name(text: String) -> void:
@@ -1092,7 +1169,11 @@ func rpc_contract_end(title: String, score: int, pay: int, completeness: float, 
 	if Boot.world:
 		Boot.world.set_shelf(history)
 	contract_running = false
-	money += pay
+	# Половина гонорара — в фонд студии, половина — каждому в карман.
+	# Кому польза, тот и платит: апгрейды офиса из фонда, навыки из своего.
+	var share := int(round(float(pay) * 0.5))
+	money += pay - share
+	Boot.add_wallet(share)
 	difficulty += 1
 	# сохраняем уже после инкремента, иначе «Продолжить» откатывало на контракт назад
 	if Boot.is_host():
@@ -1170,6 +1251,8 @@ func held_item_of(pid: int):
 
 func is_local_busy() -> bool:
 	if Boot.naming_panel != null and Boot.naming_panel.active:
+		return true
+	if Boot.shop_open():
 		return true
 	if Boot.active_panel() != null:
 		return true

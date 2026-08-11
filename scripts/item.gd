@@ -106,14 +106,17 @@ func _process(delta: float) -> void:
 		# интерполяцией: позиция отставала, а поворот применялся сразу,
 		# из-за чего подпись при развороте будто раздваивалась.
 		var p := Boot.players[holder] as Node3D
-		var grip := _grip_of(p)
+		# со скиллом «Обе руки» второй предмет уходит в левую ладонь
+		var slot := Game.hold_index_of(item_id, holder)
+		var grip := _grip_of(p, slot == 0)
 		if grip:
 			# точка в ладони модели; поворот берём у игрока, чтобы подпись
 			# не крутилась вместе с рукой
 			global_position = grip.global_position
 		else:
 			var fwd := -p.global_transform.basis.z
-			global_position = p.global_position + fwd * 0.8 + Vector3(0, 0.15, 0)
+			var side := p.global_transform.basis.x * (0.35 if slot == 0 else -0.35)
+			global_position = p.global_position + fwd * 0.8 + side + Vector3(0, 0.15, 0)
 		target_pos = global_position
 		rotation.y = p.rotation.y
 	else:
@@ -128,17 +131,17 @@ func _process(delta: float) -> void:
 
 
 ## Точка предмета в правой ладони. null, если игрок ещё на капсуле-заглушке.
-func _grip_of(p: Node3D) -> Node3D:
+func _grip_of(p: Node3D, right := true) -> Node3D:
 	var v = p.get("visual")
 	if v == null or not is_instance_valid(v):
 		return null
 	if not v.has_method("get_grip"):
 		return null
-	return v.get_grip(true)
+	return v.get_grip(right)
 
 
 func can_focus(p) -> bool:
-	return holder == 0 and Game.held_item_of(p.peer_id) == null
+	return holder == 0 and Game.held_items_of(p.peer_id).size() < Game.carry_capacity(p.peer_id)
 
 
 func get_prompt(_p) -> String:

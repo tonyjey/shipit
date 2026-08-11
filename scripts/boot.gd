@@ -2,7 +2,7 @@ extends Node
 ## Точка входа. Автозагрузка "Boot".
 ## Отвечает за: ввод, меню, сеть, спавн игроков, HUD.
 
-const VERSION := "v1.10"
+const VERSION := "v2.0"
 const PORT := 7777
 const MAX_PLAYERS := 4
 
@@ -13,11 +13,34 @@ const ResultsScript := preload("res://scripts/results.gd")
 const SettingsScript := preload("res://scripts/settings_panel.gd")
 const PauseScript := preload("res://scripts/pause_menu.gd")
 const NamingScript := preload("res://scripts/naming.gd")
+const ShopScript := preload("res://scripts/shop_panel.gd")
 const RhythmScript := preload("res://scripts/rhythm.gd")
 const PaintScript := preload("res://scripts/paint.gd")
 
 const SAVE_PATH := "user://savegame.json"
 const SETTINGS_PATH := "user://settings.json"
+const PLAYER_PATH := "user://player.json"
+
+## Личные навыки: постоянные, покупаются за свой кошелёк.
+## Правило отбора — навык меняет то, КАК ты играешь, но не отменяет мини-игру.
+const SKILLS := [
+	{
+		"id": "long_arms", "price": 1200, "name": "Длинные руки",
+		"desc": "Радиус взаимодействия 2.7 → 3.7 м. Можно хватать дискету, не тормозя на бегу.",
+	},
+	{
+		"id": "fast_legs", "price": 1800, "name": "Лёгкие ноги",
+		"desc": "Скорость бега +15%. Лоток и сборка становятся заметно ближе.",
+	},
+	{
+		"id": "second_wind", "price": 2400, "name": "Второе дыхание",
+		"desc": "В последней четверти срока скорость ещё +30%. Спасает горящие контракты.",
+	},
+	{
+		"id": "two_hands", "price": 3200, "name": "Обе руки",
+		"desc": "Носишь два предмета сразу. Один заход к лотку вместо двух.",
+	},
+]
 
 const DEFAULT_BINDS := {
 	"move_forward": KEY_W,
@@ -62,6 +85,9 @@ var focus_node: Node = null   # на что сейчас наведён приц
 var settings_panel = null
 var pause_menu = null
 var naming_panel = null
+var shop_panel = null
+var wallet := 0
+var skills: Dictionary = {}
 var save_history: Array = []
 var _music: AudioStreamPlayer = null
 var binds: Dictionary = {}
@@ -92,6 +118,7 @@ var _toast_time := 0.0
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	load_settings()
+	load_player()
 	load_progress()
 	_setup_input()
 	_setup_audio()
@@ -310,6 +337,13 @@ func _build_ui() -> void:
 	box.add_child(_save_label)
 	_refresh_save_label()
 
+	var wallet_label := Label.new()
+	wallet_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	wallet_label.add_theme_font_size_override("font_size", 14)
+	wallet_label.add_theme_color_override("font_color", Color(0.95, 0.85, 0.45))
+	wallet_label.text = "Твой кошелёк: $%d   ·   навыков: %d из %d" % [wallet, skills.size(), SKILLS.size()]
+	box.add_child(wallet_label)
+
 	var b_reset := Button.new()
 	b_reset.text = "Начать заново (сбросить прогресс)"
 	b_reset.pressed.connect(func():
@@ -343,6 +377,9 @@ func _build_ui() -> void:
 
 	naming_panel = NamingScript.new()
 	_hud.add_child(naming_panel)
+
+	shop_panel = ShopScript.new()
+	_hud.add_child(shop_panel)
 
 	pause_menu = PauseScript.new()
 	_hud.add_child(pause_menu)
@@ -633,6 +670,7 @@ func _enter_game() -> void:
 	get_tree().current_scene.add_child(world)
 	set_mouse_captured(true)
 	start_music()
+	Game.push_skills()
 	toast("Контракт берут у издателя: дверь в правой стене, откроется по E", 9.0)
 	if terminal:
 		terminal.close()
@@ -724,7 +762,8 @@ func dump_state() -> void:
 	var lp = local_player()
 	if lp:
 		print("player        : pos=", lp.global_position, " focus=", lp._focus)
-	print("held item     : ", Game.held_item_of(local_id()))
+	print("в руках       : ", Game.held_items_of(local_id()).size(), " из ", Game.carry_capacity(local_id()))
+	print("кошелёк/навыки: $", wallet, " ", skills.keys())
 	print("предметов     : ", Game.items.size(), "  работа на столах: ", Game.work)
 	print("контракт      : ", Game.contract, " идёт=", Game.contract_running, " время=", Game.contract_time)
 	print("сдано         : ", Game.delivered_by, "  деньги: ", Game.money)
@@ -733,6 +772,10 @@ func dump_state() -> void:
 
 
 ## Какая мини-игра стоит на столе этой дисциплины.
+func shop_open() -> bool:
+	return shop_panel != null and shop_panel.active
+
+
 func panel_for(disc: String):
 	if disc == "music":
 		return rhythm
@@ -771,6 +814,76 @@ func set_mouse_captured(v: bool) -> void:
 
 
 ## Локальные IPv4 — их диктуют напарнику при игре по сети.
+# ---------------------------------------------------------------- ЛИЧНОЕ
+
+## Кошелёк и навыки лежат у игрока, а не в сохранёнке студии: иначе прокачка
+## терялась бы каждый раз, когда хостит кто-то другой.
+func save_player() -> void:
+	var f := FileAccess.open(PLAYER_PATH, FileAccess.WRITE)
+	if f == null:
+		return
+	f.store_string(JSON.stringify({"wallet": wallet, "skills": skills.keys()}))
+	f.close()
+
+
+func load_player() -> void:
+	wallet = 0
+	skills = {}
+	if not FileAccess.file_exists(PLAYER_PATH):
+		return
+	var f := FileAccess.open(PLAYER_PATH, FileAccess.READ)
+	if f == null:
+		return
+	var data = JSON.parse_string(f.get_as_text())
+	f.close()
+	if typeof(data) != TYPE_DICTIONARY:
+		return
+	wallet = int(data.get("wallet", 0))
+	for id in data.get("skills", []):
+		skills[String(id)] = true
+
+
+func has_skill(id: String) -> bool:
+	return skills.has(id)
+
+
+func skill_price(id: String) -> int:
+	for s in SKILLS:
+		if String(s["id"]) == id:
+			return int(s["price"])
+	return 0
+
+
+func buy_skill(id: String) -> bool:
+	var price := skill_price(id)
+	if price <= 0 or has_skill(id) or wallet < price:
+		return false
+	wallet -= price
+	skills[id] = true
+	save_player()
+	Game.push_skills()
+	toast("Навык куплен: %s" % _skill_name(id), 3.0)
+	return true
+
+
+func add_wallet(amount: int) -> void:
+	wallet = maxi(wallet + amount, 0)
+	save_player()
+
+
+func reset_player() -> void:
+	wallet = 0
+	skills = {}
+	save_player()
+
+
+func _skill_name(id: String) -> String:
+	for s in SKILLS:
+		if String(s["id"]) == id:
+			return String(s["name"])
+	return id
+
+
 func save_settings() -> void:
 	var f := FileAccess.open(SETTINGS_PATH, FileAccess.WRITE)
 	if f == null:
@@ -879,7 +992,7 @@ func update_contract_hud() -> void:
 	if _contract_label == null:
 		return
 	if Game.contract.is_empty() or not Game.contract_running:
-		_contract_label.text = "Контракта нет\nЗайди к издателю (дверь справа)\nСчёт студии: $%d" % Game.money
+		_contract_label.text = "Контракта нет\nЗайди к издателю (дверь справа)\nФонд студии: $%d   ·   кошелёк: $%d" % [Game.money, wallet]
 		return
 	var lines: PackedStringArray = []
 	lines.append("Контракт №%d  ·  %s" % [int(Game.contract.get("index", 1)), String(Game.contract["title"])])
@@ -900,7 +1013,7 @@ func update_contract_hud() -> void:
 			Game.bugs_left(), Game.bugs_total, int(Game.testing_left)])
 	elif Game.contract_running and Game.requirements_met():
 		lines.append("Контент готов — неси его на тестирование")
-	lines.append("Счёт студии: $%d" % Game.money)
+	lines.append("Фонд студии: $%d   ·   твой кошелёк: $%d" % [Game.money, wallet])
 	_contract_label.text = "\n".join(lines)
 
 
