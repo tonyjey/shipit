@@ -31,6 +31,21 @@ const SHIN := 0.41
 const FOOT_H := 0.10
 const HIP_HEIGHT := 0.92
 
+## Узлы, которые красятся в цвет игрока. Галстук, глаза, воротник и
+## ботинки не трогаем: галстук — форма студии, он одинаковый у всех,
+## и именно поэтому игроки читаются одним пятном цвета.
+const BODY_PARTS := [
+	"Hips", "Torso",
+	"Arm_L_Upper", "Arm_L_Lower", "Hand_L",
+	"Arm_R_Upper", "Arm_R_Lower", "Hand_R",
+	"Leg_L_Upper", "Leg_L_Lower",
+	"Leg_R_Upper", "Leg_R_Lower",
+]
+const HEAD_PARTS := ["Head"]
+## Насколько голова светлее тела — чтобы лицо не сливалось с торсом.
+const HEAD_LIGHTEN := 0.14
+
+
 const JOINTS := [
 	"Character_ROOT", "Hips", "Torso", "Collar", "Tie",
 	"Head", "Eye_L", "Eye_R", "Head_Top",
@@ -207,6 +222,32 @@ func _apply() -> void:
 ## В rest = 0.41 + 0.41 + 0.10 = 0.92 = высоте таза.
 func _leg_reach(hip: float, knee: float) -> float:
 	return THIGH * cos(hip) + (SHIN + FOOT_H) * cos(hip + knee)
+
+
+## Перекрасить персонажа в цвет игрока.
+func apply_color(body: Color) -> void:
+	for n in BODY_PARTS:
+		_tint(n, body)
+	for n in HEAD_PARTS:
+		_tint(n, body.lightened(HEAD_LIGHTEN))
+
+
+## Материал дублируется на инстанс, иначе перекраска одного игрока
+## перекрасила бы всех — ресурс в Godot общий.
+func _tint(joint: String, c: Color) -> void:
+	var node := _j.get(joint) as MeshInstance3D
+	if node == null:
+		return
+	for i in range(node.get_surface_override_material_count()):
+		var src := node.get_active_material(i)
+		var mat: StandardMaterial3D = null
+		if src is StandardMaterial3D:
+			mat = (src as StandardMaterial3D).duplicate() as StandardMaterial3D
+		else:
+			mat = StandardMaterial3D.new()
+			mat.roughness = 0.68
+		mat.albedo_color = c
+		node.set_surface_override_material(i, mat)
 
 
 ## Сбросить все суставы в rest.

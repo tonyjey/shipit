@@ -10,6 +10,10 @@ const NET_RATE := 1.0 / 20.0
 const REACH := 2.7        # радиус взаимодействия
 const MIN_DOT := 0.25     # насколько нужно смотреть на объект
 
+const CHARACTER_MODEL := "res://models/character.glb"
+const MODEL_Y := -0.85    # origin капсулы в центре, у модели — на подошвах
+const LABEL_Y := 1.00     # метка чуть выше макушки (макушка на 0.85 локально)
+
 # задаётся из Boot ДО add_child
 var peer_id := 1
 var slot := 1
@@ -21,6 +25,7 @@ var yaw := 0.0
 var pitch := -0.25
 
 var first_person := true
+var visual: CharacterVisual = null
 var _mesh_nodes: Array = []
 var _tag: Label3D = null
 var _pivot: Node3D
@@ -53,6 +58,43 @@ func _build_body() -> void:
 	shape.shape = caps
 	add_child(shape)
 
+	if not _build_model():
+		_build_placeholder()
+
+	var label := Label3D.new()
+	label.text = "P%d" % slot
+	label.position = Vector3(0, LABEL_Y, 0)
+	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	label.no_depth_test = true
+	label.pixel_size = 0.006
+	label.outline_size = 10
+	add_child(label)
+	_tag = label
+
+
+## Модель персонажа. Её origin — между ступнями, а у CharacterBody3D
+## origin в центре капсулы, поэтому опускаем на половину роста.
+func _build_model() -> bool:
+	var ps = load(CHARACTER_MODEL)
+	if ps == null:
+		push_warning("player: не найдена модель %s — ставлю капсулу" % CHARACTER_MODEL)
+		return false
+	var holder := CharacterVisual.new()
+	holder.name = "Visual"
+	holder.position = Vector3(0, MODEL_Y, 0)
+	holder.auto_track_velocity = true
+	holder.add_child(ps.instantiate())
+	add_child(holder)
+	visual = holder
+	visual.apply_color(color)
+	for n in visual.find_children("*", "MeshInstance3D", true, false):
+		_mesh_nodes.append(n)
+	return true
+
+
+## Запасной вариант на случай, если GLB не собран: старая капсула с носом.
+## Лучше играть в кубики, чем упасть с ошибкой.
+func _build_placeholder() -> void:
 	var mat := StandardMaterial3D.new()
 	mat.albedo_color = color
 
@@ -73,16 +115,6 @@ func _build_body() -> void:
 	nose.position = Vector3(0, 0.45, -0.4)
 	add_child(nose)
 	_mesh_nodes.append(nose)
-
-	var label := Label3D.new()
-	label.text = "P%d" % slot
-	label.position = Vector3(0, 1.35, 0)
-	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	label.no_depth_test = true
-	label.pixel_size = 0.006
-	label.outline_size = 10
-	add_child(label)
-	_tag = label
 
 
 func _build_camera() -> void:

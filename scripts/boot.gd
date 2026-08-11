@@ -50,6 +50,7 @@ const COLORS := [
 var world = null
 var players: Dictionary = {}     # peer_id -> Player
 var slots: Dictionary = {}       # peer_id -> 1..4
+var colors: Dictionary = {}      # peer_id -> индекс в COLORS
 var ready_peers: Array = []      # кому уже можно слать состояние
 var in_game := false
 var terminal = null
@@ -65,6 +66,10 @@ var save_history: Array = []
 var _music: AudioStreamPlayer = null
 var binds: Dictionary = {}
 var volumes: Dictionary = {"master": 1.0, "sfx": 1.0, "music": 1.0}
+## Выбранный игроком цвет персонажа. Локальная настройка: по сети
+## уезжает при подключении, одинаковые цвета разрешены.
+var my_color := 0
+var _color_buttons: Array = []
 var save_money := 0
 var save_difficulty := 0
 
@@ -273,6 +278,8 @@ func _build_ui() -> void:
 	box.add_child(sub)
 
 	box.add_child(Control.new())
+	box.add_child(_build_color_row())
+	box.add_child(Control.new())
 
 	var b_host := Button.new()
 	b_host.text = "Создать комнату (хост)"
@@ -349,6 +356,62 @@ func _build_ui() -> void:
 	ip_info.add_theme_color_override("font_color", Color(0.60, 0.64, 0.72))
 	ip_info.text = "Твои адреса для друга: %s\nПорт 7777 (UDP)" % ", ".join(local_ips())
 	box.add_child(ip_info)
+
+
+## Выбор цвета персонажа. Цвет локальный: он уезжает на сервер при
+## подключении, одинаковые цвета у разных игроков разрешены.
+func _build_color_row() -> Control:
+	var wrap := VBoxContainer.new()
+
+	var cap := Label.new()
+	cap.text = "Цвет персонажа"
+	cap.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	cap.add_theme_color_override("font_color", Color(0.70, 0.74, 0.82))
+	wrap.add_child(cap)
+
+	var row := HBoxContainer.new()
+	row.alignment = BoxContainer.ALIGNMENT_CENTER
+	row.add_theme_constant_override("separation", 8)
+	wrap.add_child(row)
+
+	_color_buttons.clear()
+	for i in COLORS.size():
+		var b := Button.new()
+		b.custom_minimum_size = Vector2(52, 32)
+		b.focus_mode = Control.FOCUS_NONE
+		b.pressed.connect(_choose_color.bind(i))
+		row.add_child(b)
+		_color_buttons.append(b)
+
+	_refresh_color_row()
+	return wrap
+
+
+func _choose_color(i: int) -> void:
+	my_color = clampi(i, 0, COLORS.size() - 1)
+	save_settings()
+	_refresh_color_row()
+	play_sfx("click")
+
+
+func _refresh_color_row() -> void:
+	for i in _color_buttons.size():
+		var b: Button = _color_buttons[i]
+		for state in ["normal", "hover", "pressed", "disabled"]:
+			b.add_theme_stylebox_override(state, _color_swatch(i, i == my_color))
+
+
+func _color_swatch(i: int, selected: bool) -> StyleBoxFlat:
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = COLORS[i]
+	sb.set_corner_radius_all(5)
+	if selected:
+		sb.set_border_width_all(3)
+		sb.border_color = Color(1, 1, 1, 0.95)
+	else:
+		sb.set_border_width_all(1)
+		sb.border_color = Color(0, 0, 0, 0.45)
+	return sb
 
 
 func _setup_audio() -> void:
@@ -459,7 +522,7 @@ func _host() -> void:
 	multiplayer.multiplayer_peer = peer
 	_enter_game()
 	ready_peers = [1]
-	_spawn_player(1, 1)
+	_spawn_player(1, 1, my_color)
 	Game.apply_progress(save_money, save_difficulty, save_history)
 	toast("Комната создана. Твой адрес: %s   порт %d" % [", ".join(local_ips()), PORT], 8.0)
 	Game.server_start_contract()
@@ -483,13 +546,13 @@ func _solo() -> void:
 	multiplayer.multiplayer_peer = null
 	_enter_game()
 	ready_peers = [1]
-	_spawn_player(1, 1)
+	_spawn_player(1, 1, my_color)
 	Game.apply_progress(save_money, save_difficulty, save_history)
 
 
 func _on_connected_ok() -> void:
 	_enter_game()
-	rpc_id(1, "_request_join")
+	rpc_id(1, "_request_join", my_color)
 
 
 func _on_connection_failed() -> void:
@@ -524,13 +587,14 @@ func _free_slot() -> int:
 
 ## Клиент сообщает: мир построен, можно присылать игроков и предметы.
 @rpc("any_peer", "reliable")
-func _request_join() -> void:
+func _request_join(color_idx := 0) -> void:
 	if not multiplayer.is_server():
 		return
 	var new_id := multiplayer.get_remote_sender_id()
 	for existing_id in players.keys():
-		rpc_id(new_id, "_remote_spawn", existing_id, int(slots[existing_id]))
-	rpc("_remote_spawn", new_id, _free_slot())
+		rpc_id(new_id, "_remote_spawn", existing_id,
+			int(slots[existing_id]), int(colors.get(existing_id, 0)))
+	rpc("_remote_spawn", new_id, _free_slot(), int(color_idx))
 	ready_peers.append(new_id)
 	rpc("_sync_ready", ready_peers)
 	Game.server_send_snapshot(new_id)
@@ -542,8 +606,8 @@ func _sync_ready(list: Array) -> void:
 
 
 @rpc("authority", "call_local", "reliable")
-func _remote_spawn(id: int, slot: int) -> void:
-	_spawn_player(id, slot)
+func _remote_spawn(id: int, slot: int, color_idx := -1) -> void:
+	_spawn_player(id, slot, color_idx)
 
 
 @rpc("authority", "call_local", "reliable")
@@ -552,6 +616,7 @@ func _remote_despawn(id: int) -> void:
 		players[id].queue_free()
 		players.erase(id)
 		slots.erase(id)
+		colors.erase(id)
 		toast("Игрок вышел")
 
 
@@ -584,6 +649,7 @@ func _leave_game() -> void:
 	multiplayer.multiplayer_peer = null
 	players.clear()
 	slots.clear()
+	colors.clear()
 	ready_peers.clear()
 	Game.reset()
 	if world:
@@ -595,14 +661,18 @@ func _leave_game() -> void:
 	set_mouse_captured(false)
 
 
-func _spawn_player(id: int, slot: int) -> void:
+func _spawn_player(id: int, slot: int, color_idx := -1) -> void:
 	if world == null or players.has(id):
 		return
+	if color_idx < 0:
+		color_idx = (slot - 1) % COLORS.size()
+	color_idx = clampi(color_idx, 0, COLORS.size() - 1)
+	colors[id] = color_idx
 	var p := PlayerScript.new()
 	p.name = str(id)
 	p.peer_id = id
 	p.slot = slot
-	p.color = COLORS[(slot - 1) % COLORS.size()]
+	p.color = COLORS[color_idx]
 	p.spawn_pos = world.get_spawn_point(slot - 1)
 	p.set_multiplayer_authority(id)
 	players[id] = p
@@ -705,7 +775,7 @@ func save_settings() -> void:
 	var f := FileAccess.open(SETTINGS_PATH, FileAccess.WRITE)
 	if f == null:
 		return
-	f.store_string(JSON.stringify({"binds": binds, "volumes": volumes}))
+	f.store_string(JSON.stringify({"binds": binds, "volumes": volumes, "color": my_color}))
 	f.close()
 
 
@@ -728,6 +798,7 @@ func load_settings() -> void:
 	for k in ["master", "sfx", "music"]:
 		if vol.has(k):
 			volumes[k] = clampf(float(vol[k]), 0.0, 1.0)
+	my_color = clampi(int(data.get("color", 0)), 0, COLORS.size() - 1)
 
 
 ## Прогресс студии: деньги и номер контракта. Сохраняется после каждой сдачи.
