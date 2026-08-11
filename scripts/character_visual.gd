@@ -103,7 +103,15 @@ const JOINTS := [
 @export var fall_hip_deg := -6.0
 @export var fall_knee_deg := -8.0
 @export var fall_arm_deg := 24.0
+## Скорость входа в позу прыжка и выхода из неё. Выход медленнее входа:
+## приземление так читается мягче, а отрыв остаётся резким.
 @export var air_blend_speed := 9.0
+@export var air_exit_speed := 4.5
+## На какой вертикальной скорости поза считается «полностью взлёт» или
+## «полностью падение». Между ними углы интерполируются непрерывно,
+## поэтому на пике прыжка персонаж проходит через промежуточную позу,
+## а не переключается рывком, как анимация в два кадра.
+@export var air_pose_span := 4.0
 
 @export_group("Стойка")
 @export var idle_breath_deg := 0.9
@@ -133,7 +141,8 @@ var _carrying := false
 var _carry_blend := 0.0
 var _vertical := 0.0
 var _air_blend := 0.0
-var _rising := true
+## 1.0 — взлёт, 0.0 — падение, 0.5 — верхняя точка
+var _air_pose := 1.0
 
 
 func _ready() -> void:
@@ -180,10 +189,15 @@ func tick(delta: float, speed_mps := -1.0) -> void:
 	var want := 1.0 if _carrying else 0.0
 	_carry_blend = lerpf(_carry_blend, want, clampf(delta * carry_blend_speed, 0.0, 1.0))
 
-	var air_want := 1.0 if absf(_vertical) > airborne_speed_threshold else 0.0
-	if absf(_vertical) > airborne_speed_threshold:
-		_rising = _vertical > 0.0
-	_air_blend = lerpf(_air_blend, air_want, clampf(delta * air_blend_speed, 0.0, 1.0))
+	var in_air := absf(_vertical) > airborne_speed_threshold
+	var air_want := 1.0 if in_air else 0.0
+	var air_rate := air_blend_speed if in_air else air_exit_speed
+	_air_blend = lerpf(_air_blend, air_want, clampf(delta * air_rate, 0.0, 1.0))
+
+	# непрерывный переход взлёт -> пик -> падение по вертикальной скорости
+	var pose_t := clampf(
+		inverse_lerp(-air_pose_span, air_pose_span, _vertical), 0.0, 1.0)
+	_air_pose = lerpf(_air_pose, pose_t, clampf(delta * 20.0, 0.0, 1.0))
 
 	if _speed > 0.05:
 		var hz := _speed / maxf(_stride(), 0.01)
@@ -307,9 +321,10 @@ func _apply_air() -> void:
 	var a := clampf(_air_blend, 0.0, 1.0)
 	if a <= 0.001:
 		return
-	var hip := deg_to_rad(jump_hip_deg if _rising else fall_hip_deg)
-	var knee := deg_to_rad(jump_knee_deg if _rising else fall_knee_deg)
-	var arm := deg_to_rad(jump_arm_deg if _rising else fall_arm_deg)
+	var t := clampf(_air_pose, 0.0, 1.0)
+	var hip := deg_to_rad(lerpf(fall_hip_deg, jump_hip_deg, t))
+	var knee := deg_to_rad(lerpf(fall_knee_deg, jump_knee_deg, t))
+	var arm := deg_to_rad(lerpf(fall_arm_deg, jump_arm_deg, t))
 	for n in ["Leg_L_Upper", "Leg_R_Upper"]:
 		_blend_x(n, hip, a)
 	for n in ["Leg_L_Lower", "Leg_R_Lower"]:

@@ -55,16 +55,30 @@ if not exist "!GODOT!" (
     exit /b 1
 )
 
-echo Step 1/2 - importing and parsing scripts...
+echo Step 1/3 - importing and parsing scripts...
 "!GODOT!" --headless --path "%CD%" --import > check_log.txt 2>&1
 
-echo Step 2/2 - test launch...
+echo Step 2/3 - test launch...
 "!GODOT!" --headless --path "%CD%" --quit-after 30 >> check_log.txt 2>&1
+
+rem Asset regression: catches a rebuilt character.glb with wrong scale,
+rem a renamed joint or a flipped axis before it shows up in the game.
+echo Step 3/3 - character rig check...
+if exist rig_debug.tscn (
+    "!GODOT!" --headless --path "%CD%" res://rig_debug.tscn --quit-after 120 >> check_log.txt 2>&1
+) else (
+    echo [i] rig_debug.tscn not present - rig check skipped.
+)
 
 echo.
 echo -------- PROBLEMS FOUND --------
 findstr /i /n /c:"SCRIPT ERROR" /c:"Parse Error" /c:"ERROR:" /c:"Cannot infer" /c:"Invalid" /c:"not found" check_log.txt
 if errorlevel 1 echo Nothing found. The project builds cleanly.
+echo --------------------------------
+echo.
+echo -------- CHARACTER RIG ---------
+findstr /c:"FAIL" check_log.txt
+if errorlevel 1 (echo All rig checks passed.) else (echo [x] RIG CHECK FAILED - see check_log.txt)
 echo --------------------------------
 echo.
 echo Full log: check_log.txt
