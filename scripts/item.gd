@@ -106,8 +106,14 @@ func _process(delta: float) -> void:
 		# интерполяцией: позиция отставала, а поворот применялся сразу,
 		# из-за чего подпись при развороте будто раздваивалась.
 		var p := Boot.players[holder] as Node3D
-		var fwd := -p.global_transform.basis.z
-		global_position = p.global_position + fwd * 0.8 + Vector3(0, 0.15, 0)
+		var grip := _grip_of(p)
+		if grip:
+			# точка в ладони модели; поворот берём у игрока, чтобы подпись
+			# не крутилась вместе с рукой
+			global_position = grip.global_position
+		else:
+			var fwd := -p.global_transform.basis.z
+			global_position = p.global_position + fwd * 0.8 + Vector3(0, 0.15, 0)
 		target_pos = global_position
 		rotation.y = p.rotation.y
 	else:
@@ -119,6 +125,16 @@ func _process(delta: float) -> void:
 	# все предметы в радиусе, и лоток превращался в кашу из наложенных строк.
 	if _label:
 		_label.visible = Boot.focus_node == self
+
+
+## Точка предмета в правой ладони. null, если игрок ещё на капсуле-заглушке.
+func _grip_of(p: Node3D) -> Node3D:
+	var v = p.get("visual")
+	if v == null or not is_instance_valid(v):
+		return null
+	if not v.has_method("get_grip"):
+		return null
+	return v.get_grip(true)
 
 
 func can_focus(p) -> bool:

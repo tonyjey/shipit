@@ -22,7 +22,7 @@ const EXPECT_HEIGHT := 1.70
 
 @export var model_scene: PackedScene
 @export var patrol_distance := 4.5
-@export var start_speed := 5.5   ## столько же, сколько SPEED у игрока
+@export var start_speed := 4.5   ## столько же, сколько SPEED у игрока
 
 var visual: CharacterVisual
 var model: Node3D
@@ -30,6 +30,9 @@ var label: Label
 var _speed := 0.0
 var _dir := 1.0
 var _t := 0.0
+var _carry := false
+var _jump_v := 0.0
+var _jump_y := 0.0
 
 
 func _ready() -> void:
@@ -152,6 +155,15 @@ func _process(delta: float) -> void:
 		visual.report()
 	if Input.is_key_pressed(KEY_ESCAPE):
 		get_tree().quit()
+	if Input.is_action_just_pressed("ui_left"):
+		_carry = not _carry
+		visual.set_carrying(_carry)
+	if Input.is_action_just_pressed("ui_right") and _jump_y <= 0.001:
+		_jump_v = 6.5
+	_jump_v -= 18.0 * delta
+	_jump_y = maxf(0.0, _jump_y + _jump_v * delta)
+	if _jump_y <= 0.0:
+		_jump_v = 0.0
 
 	# патруль вперёд-назад, персонаж разворачивается лицом по ходу
 	var p := visual.position
@@ -159,6 +171,7 @@ func _process(delta: float) -> void:
 	if absf(p.z) > patrol_distance:
 		_dir = -_dir
 		p.z = clampf(p.z, -patrol_distance, patrol_distance)
+	p.y = _jump_y
 	visual.position = p
 	# модель смотрит в -Z, значит при движении в +Z разворачиваем на 180
 	visual.rotation.y = 0.0 if _dir < 0.0 else PI
@@ -166,8 +179,10 @@ func _process(delta: float) -> void:
 	_t += delta
 	if _t < 2.0:
 		_hide_game_hud()   # HUD автозагрузки достраивается не сразу
-	label.text ="скорость %.2f м/с   (↑/↓ менять, пробел — стоп, R — сброс, T — отчёт)\n" % _speed
-	label.text += "анимация: %.2f м/с" % visual.get_speed()
+	var carry_text := "да" if _carry else "нет"
+	label.text = "скорость %.2f м/с   (↑/↓ менять, пробел — стоп, R — сброс)\n" % _speed
+	label.text += "шагов/сек: %.2f   перенос: %s   (← перенос, → прыжок)" % [
+		visual.step_hz(), carry_text]
 
 
 # ------------------------------------------------------------

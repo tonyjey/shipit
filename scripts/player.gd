@@ -1,7 +1,7 @@
 extends CharacterBody3D
 ## Персонаж. Собирается кодом, отдельная .tscn не нужна.
 
-const SPEED := 5.5
+const SPEED := 4.5   # было 5.5: на 5.5 ноги не успевали за землёй
 const ACCEL := 14.0
 const JUMP_FORCE := 6.5
 const SENS := 0.0022
@@ -13,6 +13,12 @@ const MIN_DOT := 0.25     # насколько нужно смотреть на 
 const CHARACTER_MODEL := "res://models/character.glb"
 const MODEL_Y := -0.85    # origin капсулы в центре, у модели — на подошвах
 const LABEL_Y := 1.00     # метка чуть выше макушки (макушка на 0.85 локально)
+## Что остаётся видимым от первого лица, когда в руке предмет.
+## Только кисть. Предплечье пробовали — локоть оказывается в 25 см от
+## глаз и занимает пол-экрана: у персонажа рука 0.5 м, а камера в голове,
+## так что вытянутое предплечье физически не может выглядеть уместно
+## без отдельной модели рук с собственным FOV, как в шутерах.
+const FPS_ARM_PARTS := ["Hand_R"]
 
 # задаётся из Boot ДО add_child
 var peer_id := 1
@@ -27,6 +33,8 @@ var pitch := -0.25
 var first_person := true
 var visual: CharacterVisual = null
 var _mesh_nodes: Array = []
+var _fps_arm: Array = []
+var _carrying_now := false
 var _tag: Label3D = null
 var _pivot: Node3D
 var _spring: SpringArm3D
@@ -89,6 +97,8 @@ func _build_model() -> bool:
 	visual.apply_color(color)
 	for n in visual.find_children("*", "MeshInstance3D", true, false):
 		_mesh_nodes.append(n)
+		if FPS_ARM_PARTS.has(String(n.name)):
+			_fps_arm.append(n)
 	return true
 
 
@@ -143,10 +153,15 @@ func _apply_view() -> void:
 	if _cam:
 		_cam.position = Vector3.ZERO if first_person else Vector3(0.5, 0, 0)
 	for m in _mesh_nodes:
-		if first_person:
-			m.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_SHADOWS_ONLY
-		else:
+		# от первого лица тело прячем, но предплечье с предметом оставляем:
+		# так видно, что именно у тебя в руках, без отдельной модели рук
+		var keep := not first_person
+		if first_person and _carrying_now and _fps_arm.has(m):
+			keep = true
+		if keep:
 			m.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON
+		else:
+			m.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_SHADOWS_ONLY
 	if _tag:
 		_tag.visible = not first_person
 
@@ -196,6 +211,13 @@ func _physics_process(delta: float) -> void:
 		var t := clampf(delta * 12.0, 0.0, 1.0)
 		global_position = global_position.lerp(_net_pos, t)
 		rotation.y = lerp_angle(rotation.y, _net_yaw, t)
+
+	if visual:
+		var carrying := Game.held_item_of(peer_id) != null
+		visual.set_carrying(carrying)
+		if carrying != _carrying_now:
+			_carrying_now = carrying
+			_apply_view()
 
 
 func _local_step(delta: float) -> void:

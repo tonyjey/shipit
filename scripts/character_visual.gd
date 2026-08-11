@@ -59,16 +59,51 @@ const JOINTS := [
 ## Максимальный размах бедра. Главная ручка «размашистости».
 ## Длина шага считается из него, поэтому ступни не скользят по полу
 ## ни при каком значении: шаг = 2 * (бедро + голень) * sin(размах).
-## 34 -> шаг 0.92 м, 26 -> 0.72 м, 20 -> 0.56 м.
-@export var max_swing_deg := 26.0
+## Шаг = 2*(бедро+голень)*sin(размах): 34° -> 0.92 м, 26° -> 0.72 м.
+@export var max_swing_deg := 34.0
 ## Скорость, при которой размах достигает максимума.
 @export var reference_speed := 5.5
 ## Тонкая подстройка длины шага. 1.0 = ступни стоят на месте.
 ## Меньше 1.0 — ноги перебирают чаще, больше — подтормаживают.
 @export var stride_scale := 1.0
+## Потолок частоты шагов, циклов в секунду. Прямая ручка «скорости ног».
+## Выше него ноги перебирать не будут — вместо этого появится
+## проскальзывание ступней. Это осознанный размен: у персонажа ноги 0.82 м,
+## и на скорости 4+ м/с он физически обязан либо шагать шире человеческого,
+## либо семенить. 3.0-3.6 — частота бега живого человека.
+## 0 или меньше — снять потолок (ступни никогда не скользят).
+@export var max_step_hz := 3.6
 @export var arm_swing_ratio := 0.62
 @export var knee_bend_ratio := 0.90
 @export var hip_sway_deg := 3.5
+
+@export_group("Перенос предмета")
+## Одной рукой — для дискет и мелочи: свободная рука продолжает махать,
+## походка остаётся живой. Двумя — под коробки и крупные предметы.
+@export_enum("Одной рукой", "Двумя руками") var carry_style := 0
+## 78° держало предмет на линии взгляда — от первого лица он закрывал
+## пол-экрана. 66° опускает кисть под линию взгляда, в нижнюю треть кадра.
+@export var carry_upper_deg := 66.0
+@export var carry_lower_deg := 16.0
+## Отвод несущей руки наружу, чтобы предмет ушёл из центра кадра вправо.
+@export var carry_side_deg := 16.0
+## Скорость перехода в позу переноски и обратно.
+@export var carry_blend_speed := 8.0
+
+@export_group("Прыжок")
+## Поза в воздухе включается по вертикальной скорости — так она работает
+## одинаково у своего игрока и у сетевых, без единого лишнего байта в RPC.
+@export var airborne_speed_threshold := 1.0
+## ВНИМАНИЕ ЗНАКАМ: у голени +X уводит её ВПЕРЁД от бедра, а колено
+## гнётся назад. Поэтому поджатое колено — отрицательный угол.
+## С плюсом персонаж выбрасывает ноги вперёд и выглядит сидящим на стуле.
+@export var jump_hip_deg := 26.0
+@export var jump_knee_deg := -62.0
+@export var jump_arm_deg := -38.0
+@export var fall_hip_deg := -6.0
+@export var fall_knee_deg := -8.0
+@export var fall_arm_deg := 24.0
+@export var air_blend_speed := 9.0
 
 @export_group("Стойка")
 @export var idle_breath_deg := 0.9
@@ -80,6 +115,10 @@ const JOINTS := [
 ## Опускать модель так, чтобы нижняя подошва касалась пола.
 ## Без этого при махе нога «укорачивается» и персонаж скользит по воздуху.
 @export var ground_lock := true
+## Насколько полно применять прижим. 1.0 — ступни идеально на полу, но
+## корпус гуляет на 7 см дважды за цикл, и предмет в руке заметно скачет.
+## 0.7 — 5 см, ступни утапливаются максимум на 2 см. Незаметно.
+@export_range(0.0, 1.0) var ground_lock_amount := 0.7
 ## Сам мерить скорость по смещению узла. Выключи, если зовёшь tick() вручную.
 @export var auto_track_velocity := true
 
@@ -90,6 +129,11 @@ var _phase := 0.0
 var _speed := 0.0
 var _prev_pos := Vector3.ZERO
 var _has_prev := false
+var _carrying := false
+var _carry_blend := 0.0
+var _vertical := 0.0
+var _air_blend := 0.0
+var _rising := true
 
 
 func _ready() -> void:
@@ -133,9 +177,19 @@ func tick(delta: float, speed_mps := -1.0) -> void:
 	var k := clampf(delta * blend_speed, 0.0, 1.0)
 	_speed = lerpf(_speed, target, k)
 
+	var want := 1.0 if _carrying else 0.0
+	_carry_blend = lerpf(_carry_blend, want, clampf(delta * carry_blend_speed, 0.0, 1.0))
+
+	var air_want := 1.0 if absf(_vertical) > airborne_speed_threshold else 0.0
+	if absf(_vertical) > airborne_speed_threshold:
+		_rising = _vertical > 0.0
+	_air_blend = lerpf(_air_blend, air_want, clampf(delta * air_blend_speed, 0.0, 1.0))
+
 	if _speed > 0.05:
-		_phase = fposmod(
-			_phase + TAU * (_speed * delta) / maxf(_stride(), 0.01), TAU)
+		var hz := _speed / maxf(_stride(), 0.01)
+		if max_step_hz > 0.0:
+			hz = minf(hz, max_step_hz)
+		_phase = fposmod(_phase + TAU * hz * delta, TAU)
 	else:
 		# ноги сходятся в стойку, а не замирают враскоряку
 		_phase = fposmod(lerp_angle(_phase, 0.0, k * 0.5), TAU)
@@ -151,6 +205,17 @@ func get_grip(right := true) -> Node3D:
 	return _j.get("Grip_R" if right else "Grip_L") as Node3D
 
 
+## Руки вперёд под предмет. Переход плавный, ноги продолжают шагать.
+func set_carrying(on: bool) -> void:
+	_carrying = on
+
+
+## Фактическая частота шагов, циклов в секунду. Для отладки.
+func step_hz() -> float:
+	var hz := _speed / maxf(_stride(), 0.01)
+	return minf(hz, max_step_hz) if max_step_hz > 0.0 else hz
+
+
 # ------------------------------------------------------------
 func _measured_speed(delta: float) -> float:
 	var p := global_position
@@ -160,15 +225,17 @@ func _measured_speed(delta: float) -> float:
 		return 0.0
 	var d := p - _prev_pos
 	_prev_pos = p
+	_vertical = d.y / maxf(delta, 0.0001)
 	d.y = 0.0
 	return d.length() / maxf(delta, 0.0001)
 
 
-## Длина полного цикла в метрах, выведенная из размаха.
-## Частота шагов = скорость / это. Пока формула соблюдается,
-## ступня стоит на месте, пока касается пола, — нет «конькового» скольжения.
+## Длина ПОЛНОГО ЦИКЛА в метрах (левая + правая), выведенная из размаха.
+## Один шаг = 2 * L * sin(размах) — это разнос ступней при максимальном
+## разведении. Цикл = два шага, отсюда четвёрка. Делить путь надо именно
+## на цикл: с двойкой персонаж семенил ровно вдвое чаще нужного.
 func _stride() -> float:
-	return 2.0 * (THIGH + SHIN) * sin(deg_to_rad(max_swing_deg)) * stride_scale
+	return 4.0 * (THIGH + SHIN) * sin(deg_to_rad(max_swing_deg)) * stride_scale
 
 
 func _set_x(joint: String, angle: float) -> void:
@@ -194,11 +261,23 @@ func _apply() -> void:
 	_set_x("Leg_L_Lower", knee_l)
 	_set_x("Leg_R_Lower", knee_r)
 
-	# руки в противофазе к ногам
-	_set_x("Arm_L_Upper", -s * arm_swing_ratio)
-	_set_x("Arm_R_Upper", s * arm_swing_ratio)
-	_set_x("Arm_L_Lower", absf(s) * 0.22)
-	_set_x("Arm_R_Lower", absf(s) * 0.22)
+	# руки: в противофазе к ногам, либо вытянуты вперёд под предмет
+	var c_r := clampf(_carry_blend, 0.0, 1.0)
+	var c_l := c_r if carry_style == 1 else 0.0
+	var up := deg_to_rad(carry_upper_deg)
+	var lo := deg_to_rad(carry_lower_deg)
+	_set_x("Arm_L_Upper", lerpf(-s * arm_swing_ratio, up, c_l))
+	_set_x("Arm_R_Upper", lerpf(s * arm_swing_ratio, up, c_r))
+	_set_x("Arm_L_Lower", lerpf(absf(s) * 0.22, lo, c_l))
+	_set_x("Arm_R_Lower", lerpf(absf(s) * 0.22, lo, c_r))
+	# отвод в сторону: правая наружу (+Z), левая зеркально
+	var side := deg_to_rad(carry_side_deg)
+	var arm_r := _j.get("Arm_R_Upper") as Node3D
+	if arm_r:
+		arm_r.rotation.z = side * c_r
+	var arm_l := _j.get("Arm_L_Upper") as Node3D
+	if arm_l:
+		arm_l.rotation.z = -side * c_l
 
 	# корпус закручивается против таза
 	var sway := sin(_phase) * deg_to_rad(hip_sway_deg) * walk_blend
@@ -213,9 +292,37 @@ func _apply() -> void:
 		torso.rotation.x = sin(t * TAU * idle_breath_hz) \
 			* deg_to_rad(idle_breath_deg) * (1.0 - walk_blend)
 
+	_apply_air()
+
 	if ground_lock and _root:
-		_root.position.y = -(HIP_HEIGHT - maxf(
-			_leg_reach(hip_l, knee_l), _leg_reach(hip_r, knee_r)))
+		var reach := maxf(_leg_reach(hip_l, knee_l), _leg_reach(hip_r, knee_r))
+		var drop := -(HIP_HEIGHT - reach) * ground_lock_amount
+		# в прыжке прижимать ступни к полу не нужно
+		_root.position.y = lerpf(drop, 0.0, clampf(_air_blend, 0.0, 1.0))
+
+
+## Поза в воздухе поверх ходьбы: на взлёте ноги поджаты и руки идут назад,
+## на падении ноги вытянуты вниз, руки чуть вперёд для баланса.
+func _apply_air() -> void:
+	var a := clampf(_air_blend, 0.0, 1.0)
+	if a <= 0.001:
+		return
+	var hip := deg_to_rad(jump_hip_deg if _rising else fall_hip_deg)
+	var knee := deg_to_rad(jump_knee_deg if _rising else fall_knee_deg)
+	var arm := deg_to_rad(jump_arm_deg if _rising else fall_arm_deg)
+	for n in ["Leg_L_Upper", "Leg_R_Upper"]:
+		_blend_x(n, hip, a)
+	for n in ["Leg_L_Lower", "Leg_R_Lower"]:
+		_blend_x(n, knee, a)
+	# несущая рука остаётся при предмете, свободная балансирует
+	_blend_x("Arm_L_Upper", arm, a * (1.0 - _carry_blend if carry_style == 1 else 1.0))
+	_blend_x("Arm_R_Upper", arm, a * (1.0 - _carry_blend))
+
+
+func _blend_x(joint: String, angle: float, w: float) -> void:
+	var n := _j.get(joint) as Node3D
+	if n:
+		n.rotation.x = lerpf(n.rotation.x, angle, clampf(w, 0.0, 1.0))
 
 
 ## Насколько низко достаёт подошва ниже таза при данных углах.
