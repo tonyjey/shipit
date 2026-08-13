@@ -173,7 +173,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 	if event is InputEventMouseMotion and Boot.mouse_wanted:
 		yaw -= event.relative.x * SENS
-		pitch = clampf(pitch - event.relative.y * SENS, -1.2, 0.5)
+		pitch = clampf(pitch - event.relative.y * SENS, -1.35, 1.15)   # вверх почти до зенита
 		if _spring:
 			_spring.rotation.x = pitch
 	if event.is_action_pressed("toggle_view"):

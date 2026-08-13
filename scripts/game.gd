@@ -421,6 +421,13 @@ func server_send_snapshot(to_id: int) -> void:
 # ---------------------------------------------------------------- ЗАПРОСЫ
 
 func request_interact(type: String, id: int) -> void:
+	# Магазин ничего не меняет в общем мире: кошелёк и навыки личные.
+	# Раньше запрос уходил на сервер, и панель открывалась у хоста, а не у того,
+	# кто нажал E.
+	if type == "shop":
+		if Boot.shop_panel:
+			Boot.shop_panel.open_shop()
+		return
 	if _is_server():
 		_server_interact(Boot.local_id(), type, id)
 	else:
@@ -539,11 +546,6 @@ func _server_interact(pid: int, type: String, id: int) -> void:
 				# распахиваем от игрока, а не ему в лицо
 				swing = 1 if who.global_position.x < dr.global_position.x else -1
 			_bcast("rpc_door", [id, not bool(dr.is_open), swing])
-			return
-
-		"shop":
-			if pid == Boot.local_id() and Boot.shop_panel:
-				Boot.shop_panel.open_shop()
 			return
 
 		"board":

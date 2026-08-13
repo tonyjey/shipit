@@ -2,7 +2,7 @@ extends Node
 ## Точка входа. Автозагрузка "Boot".
 ## Отвечает за: ввод, меню, сеть, спавн игроков, HUD.
 
-const VERSION := "v2.0"
+const VERSION := "v2.0.1"
 const PORT := 7777
 const MAX_PLAYERS := 4
 
@@ -53,6 +53,8 @@ const DEFAULT_BINDS := {
 }
 
 const MUSIC_PATH := "res://audio/music/theme_loop.ogg"
+const MUSIC_SYNC_PERIOD := 5.0    # как часто хост сообщает позицию трека
+const MUSIC_DRIFT := 0.35         # с какого расхождения подтягиваем
 
 const SFX := {
 	"click": "res://audio/ui_click.wav",
@@ -90,6 +92,7 @@ var wallet := 0
 var skills: Dictionary = {}
 var save_history: Array = []
 var _music: AudioStreamPlayer = null
+var _music_sync := 0.0
 var binds: Dictionary = {}
 var volumes: Dictionary = {"master": 1.0, "sfx": 1.0, "music": 1.0}
 ## Выбранный игроком цвет персонажа. Локальная настройка: по сети
@@ -131,6 +134,7 @@ func _ready() -> void:
 
 
 func _process(delta: float) -> void:
+	_tick_music_sync(delta)
 	if _crosshair:
 		# прицел прячем, когда управление у панели или у меню
 		_crosshair.visible = in_game and mouse_wanted and active_panel() == null \
@@ -527,6 +531,28 @@ func stop_music() -> void:
 		_music.stop()
 
 
+## Трек у каждого запускается локально, поэтому вдвоём он расходится по фазе.
+## Хост периодически сообщает свою позицию, остальные подтягиваются.
+func _tick_music_sync(delta: float) -> void:
+	if _music == null or not _music.playing:
+		return
+	if not multiplayer.has_multiplayer_peer() or not multiplayer.is_server():
+		return
+	_music_sync -= delta
+	if _music_sync > 0.0:
+		return
+	_music_sync = MUSIC_SYNC_PERIOD
+	rpc("rpc_music_at", _music.get_playback_position())
+
+
+@rpc("authority", "call_remote", "unreliable")
+func rpc_music_at(pos: float) -> void:
+	if _music == null or not _music.playing:
+		return
+	if absf(_music.get_playback_position() - pos) > MUSIC_DRIFT:
+		_music.seek(pos)
+
+
 func set_prompt(text: String) -> void:
 	if _prompt:
 		_prompt.text = text
@@ -634,6 +660,8 @@ func _request_join(color_idx := 0) -> void:
 	rpc("_remote_spawn", new_id, _free_slot(), int(color_idx))
 	ready_peers.append(new_id)
 	rpc("_sync_ready", ready_peers)
+	if _music and _music.playing:
+		rpc_id(new_id, "rpc_music_at", _music.get_playback_position())
 	Game.server_send_snapshot(new_id)
 
 

@@ -1,6 +1,14 @@
 extends Node3D
 
 const FLOPPY_MODEL := "res://models/floppy.glb"
+
+# Дискета крупная (0.29 м), а ладонь всего в 0.23 м от оси тела: если положить
+# предмет ровно в точку хвата, половина уходит внутрь торса. Поэтому смещаем
+# наружу и вперёд от ладони и слегка уменьшаем.
+const HELD_OUT := 0.17      # наружу от тела
+const HELD_FWD := 0.16      # вперёд от ладони
+const HELD_UP := 0.02
+const HELD_SCALE := 0.85
 ## Переносимый предмет. Позицией управляет клиент локально:
 ## если предмет в руках — летит за игроком, если нет — лежит там, где сказал сервер.
 
@@ -108,11 +116,14 @@ func _process(delta: float) -> void:
 		var p := Boot.players[holder] as Node3D
 		# со скиллом «Обе руки» второй предмет уходит в левую ладонь
 		var slot := Game.hold_index_of(item_id, holder)
-		var grip := _grip_of(p, slot == 0)
+		var right := slot == 0
+		var grip := _grip_of(p, right)
 		if grip:
-			# точка в ладони модели; поворот берём у игрока, чтобы подпись
-			# не крутилась вместе с рукой
-			global_position = grip.global_position
+			# держим предмет сбоку от ладони, а не в её центре
+			var side := p.global_transform.basis.x * (HELD_OUT if right else -HELD_OUT)
+			var fwd := -p.global_transform.basis.z * HELD_FWD
+			global_position = grip.global_position + side + fwd + Vector3(0, HELD_UP, 0)
+			scale = Vector3.ONE * HELD_SCALE
 		else:
 			var fwd := -p.global_transform.basis.z
 			var side := p.global_transform.basis.x * (0.35 if slot == 0 else -0.35)
@@ -120,6 +131,7 @@ func _process(delta: float) -> void:
 		target_pos = global_position
 		rotation.y = p.rotation.y
 	else:
+		scale = Vector3.ONE
 		_spin += delta * 1.2
 		rotation.y = _spin
 		global_position = global_position.lerp(target_pos, clampf(delta * 14.0, 0.0, 1.0))

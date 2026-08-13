@@ -582,6 +582,18 @@ func _build_shop() -> void:
 	# витрина за прилавком
 	var shelf_mat := StandardMaterial3D.new()
 	shelf_mat.albedo_color = Color(0.40, 0.42, 0.46)
+
+	# витрина одним телом: сквозь полки и товар не пройти
+	var case_body := StaticBody3D.new()
+	case_body.position = Vector3(SHOP_X0 + 0.5, 1.1, 0)
+	add_child(case_body)
+	var case_cs := CollisionShape3D.new()
+	var case_shape := BoxShape3D.new()
+	case_shape.size = Vector3(0.5, 1.5, 4.0)
+	case_cs.shape = case_shape
+	case_cs.position = Vector3(0, 0.45, 0)
+	case_body.add_child(case_cs)
+
 	for row in 2:
 		var plank := MeshInstance3D.new()
 		var pm := BoxMesh.new()
